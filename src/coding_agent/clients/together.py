@@ -99,6 +99,11 @@ class TogetherClient(BaseLLMClient):
                 raise ProviderUnavailableError(f"Together API unavailable: {e}") from e
             raise
 
+
+
+
+        #####---------------- helper functions for above ----------------#####
+
     def _convert_messages(self, messages: list[UnifiedMessage]) -> list[dict[str, Any]]:
         """Convert unified messages to OpenAI-compatible format."""
         converted = []
@@ -209,11 +214,27 @@ class TogetherClient(BaseLLMClient):
         delta_tool_call = None
         if hasattr(delta, "tool_calls") and delta.tool_calls:
             tc = delta.tool_calls[0]
+            if isinstance(tc, dict):
+                index = tc.get("index")
+                fn = tc.get("function", {})
+                if isinstance(fn, dict):
+                    name = fn.get("name")
+                    arguments = fn.get("arguments")
+                else:
+                    name = fn.name
+                    arguments = fn.arguments
+                id_ = tc.get("id")
+            else:
+                index = tc.index
+                id_ = tc.id
+                name = tc.function.name if tc.function else None
+                arguments = tc.function.arguments if tc.function else None
+
             delta_tool_call = PartialToolCall(
-                index=tc.index,
-                id=tc.id if tc.id else None,
-                name=tc.function.name if tc.function and tc.function.name else None,
-                arguments_delta=tc.function.arguments if tc.function and tc.function.arguments else None,
+                index=index,
+                id=id_ if id_ else None,
+                name=name if name else None,
+                arguments_delta=arguments if arguments else None,
             )
 
         return StreamChunk(
