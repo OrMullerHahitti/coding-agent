@@ -1,109 +1,225 @@
-from typing import List, Dict, Any
+"""Main agent implementation.
+
+The CodingAgent orchestrates conversations between the user, LLM, and tools.
+It uses unified types for all interactions, making it provider-agnostic.
+"""
+
+import json
+from typing import Iterator
+
 from .clients.base import BaseLLMClient
 from .tools.base import BaseTool
-import json
+from .types import (
+    UnifiedMessage,
+    UnifiedResponse,
+    StreamChunk,
+    MessageRole,
+    FinishReason,
+    ToolCall,
+    PartialToolCall,
+)
+from .exceptions import (
+    ToolNotFoundError,
+    ToolExecutionError,
+    ToolValidationError,
+)
+
 
 class CodingAgent:
-    def __init__(self, client: BaseLLMClient, tools: List[BaseTool], system_prompt: str = "You are a helpful coding assistant."):
+    """Agent that coordinates between LLM and tools.
+
+    The agent maintains conversation history and handles the tool-use loop:
+    1. Send messages to LLM
+    2. If LLM requests tool calls, execute them
+    3. Add tool results to history
+    4. Repeat until LLM produces a final response
+    """
+
+    def __init__(
+        self,
+        client: BaseLLMClient,
+        tools: list[BaseTool],
+        system_prompt: str = "You are a helpful coding assistant.",
+    ):
+        """Initialize the agent.
+
+        Args:
+            client: The LLM client to use (provider-agnostic)
+            tools: List of tools available to the LLM
+            system_prompt: System prompt for the conversation
+        """
         self.client = client
         self.tools = {tool.name: tool for tool in tools}
-        self.history: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        self.tool_list = tools
+        self.history: list[UnifiedMessage] = [
+            UnifiedMessage(role=MessageRole.SYSTEM, content=system_prompt)
+        ]
 
-    def run(self, user_input: str, stream: bool = False):
-        self.history.append({"role": "user", "content": user_input})
-        
+    def run(self, user_input: str, stream: bool = False) -> str | None:
+        """Run a conversation turn with the given user input.
+
+        Args:
+            user_input: The user's message
+            stream: Whether to stream the response
+
+        Returns:
+            The final assistant response text, or None if streaming
+        """
+        self.history.append(
+            UnifiedMessage(role=MessageRole.USER, content=user_input)
+        )
+
         while True:
-            tool_schemas = self.client.format_tools(list(self.tools.values()))
-            response = self.client.generate_response(self.history, tools=tool_schemas if tool_schemas else None, stream=stream)
-            
+            response = self.client.generate(
+                messages=self.history,
+                tools=self.tool_list if self.tools else None,
+                stream=stream,
+            )
+
             if stream:
-                message_data, tool_calls = self._handle_stream(response)
-                self.history.append(message_data)
-                if tool_calls:
-                    self._execute_tool_calls(tool_calls)
+                # Handle streaming response
+                assert isinstance(response, Iterator)
+                final_message = self._handle_stream(response)
+                self.history.append(final_message)
+
+                if final_message.tool_calls:
+                    self._execute_tool_calls(final_message.tool_calls)
                 else:
-                    break
+                    return None  # Already printed during streaming
             else:
-                message = response.choices[0].message
-                self.history.append(message.model_dump(exclude_none=True))
+                # Handle non-streaming response
+                assert isinstance(response, UnifiedResponse)
+                self.history.append(response.message)
 
-                if message.tool_calls:
-                    # Convert object tool_calls to dict format for consistency if needed, 
-                    # but _execute_tool_calls handles list of dicts. 
-                    # Let's adapt _execute_tool_calls to handle both or convert here.
-                    # The message.tool_calls from non-stream are objects.
-                    # Let's convert them to dicts for uniform handling.
-                    tool_calls_dicts = []
-                    for tc in message.tool_calls:
-                        tool_calls_dicts.append({
-                            "id": tc.id,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments
-                            }
-                        })
-                    self._execute_tool_calls(tool_calls_dicts)
+                if response.message.tool_calls:
+                    self._execute_tool_calls(response.message.tool_calls)
                 else:
-                    print(f"Agent: {message.content}")
-                    break
+                    print(f"Agent: {response.message.content}")
+                    return response.message.content
 
-    def _handle_stream(self, response):
+    def _handle_stream(self, stream: Iterator[StreamChunk]) -> UnifiedMessage:
+        """Handle a streaming response and reconstruct the message.
+
+        Args:
+            stream: Iterator of StreamChunk objects
+
+        Returns:
+            The reconstructed UnifiedMessage
+        """
         content = ""
-        tool_calls = []
-        print("Agent: ", end="", flush=True)
-        
-        for chunk in response:
-            delta = chunk.choices[0].delta
-            if hasattr(delta, "content") and delta.content:
-                print(delta.content, end="", flush=True)
-                content += delta.content
-            
-            if hasattr(delta, "tool_calls") and delta.tool_calls:
-                for tc in delta.tool_calls:
-                    index = tc.index if hasattr(tc, "index") else tc.get("index")
-                    if len(tool_calls) <= index:
-                        tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                    tool_call = tool_calls[index]
-                    
-                    tc_id = tc.id if hasattr(tc, "id") else tc.get("id")
-                    if tc_id: tool_call["id"] += tc_id
-                    
-                    tc_function = tc.function if hasattr(tc, "function") else tc.get("function")
-                    if tc_function:
-                        name = tc_function.name if hasattr(tc_function, "name") else tc_function.get("name")
-                        if name: tool_call["function"]["name"] += name
-                        
-                        arguments = tc_function.arguments if hasattr(tc_function, "arguments") else tc_function.get("arguments")
-                        if arguments: tool_call["function"]["arguments"] += arguments
-        
-        print() # Newline after stream
-        
-        message_data = {"role": "assistant", "content": content if content else None}
-        if tool_calls:
-            message_data["tool_calls"] = tool_calls
-            
-        return message_data, tool_calls
+        tool_calls: list[ToolCall] = []
+        tool_call_builders: dict[int, dict] = {}
 
-    def _execute_tool_calls(self, tool_calls: List[Dict[str, Any]]):
-        for tool_call in tool_calls:
-            tool_name = tool_call["function"]["name"]
+        print("Agent: ", end="", flush=True)
+
+        for chunk in stream:
+            # Handle text content
+            if chunk.delta_content:
+                print(chunk.delta_content, end="", flush=True)
+                content += chunk.delta_content
+
+            # Handle tool call deltas
+            if chunk.delta_tool_call:
+                tc = chunk.delta_tool_call
+                if tc.index not in tool_call_builders:
+                    tool_call_builders[tc.index] = {
+                        "id": "",
+                        "name": "",
+                        "arguments": "",
+                    }
+
+                builder = tool_call_builders[tc.index]
+                if tc.id:
+                    builder["id"] += tc.id
+                if tc.name:
+                    builder["name"] += tc.name
+                if tc.arguments_delta:
+                    builder["arguments"] += tc.arguments_delta
+
+        print()  # Newline after stream
+
+        # Convert builders to ToolCall objects
+        for index in sorted(tool_call_builders.keys()):
+            builder = tool_call_builders[index]
             try:
-                tool_args = json.loads(tool_call["function"]["arguments"])
-                if tool_name in self.tools:
-                    print(f"Executing tool: {tool_name} with args: {tool_args}")
-                    result = self.tools[tool_name].execute(**tool_args)
-                    self.history.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "name": tool_name,
-                        "content": str(result)
-                    })
-                else:
-                    print(f"Tool {tool_name} not found")
+                arguments = json.loads(builder["arguments"]) if builder["arguments"] else {}
             except json.JSONDecodeError:
-                    print(f"Error decoding arguments for tool {tool_name}")
+                arguments = {}
+
+            tool_calls.append(ToolCall(
+                id=builder["id"],
+                name=builder["name"],
+                arguments=arguments,
+            ))
+
+        return UnifiedMessage(
+            role=MessageRole.ASSISTANT,
+            content=content if content else None,
+            tool_calls=tool_calls if tool_calls else None,
+        )
+
+    def _execute_tool_calls(self, tool_calls: list[ToolCall]) -> None:
+        """Execute tool calls and add results to history.
+
+        Args:
+            tool_calls: List of tool calls to execute
+        """
+        for tool_call in tool_calls:
+            tool_name = tool_call.name
+
+            if tool_name not in self.tools:
+                error_msg = f"Tool '{tool_name}' not found"
+                print(f"Error: {error_msg}")
+                self.history.append(UnifiedMessage(
+                    role=MessageRole.TOOL,
+                    content=error_msg,
+                    tool_call_id=tool_call.id,
+                    name=tool_name,
+                ))
+                continue
+
+            tool = self.tools[tool_name]
+            print(f"Executing tool: {tool_name} with args: {tool_call.arguments}")
+
+            try:
+                result = tool.execute(**tool_call.arguments)
+                self.history.append(UnifiedMessage(
+                    role=MessageRole.TOOL,
+                    content=str(result),
+                    tool_call_id=tool_call.id,
+                    name=tool_name,
+                ))
+            except Exception as e:
+                error_msg = f"Tool execution failed: {e}"
+                print(f"Error: {error_msg}")
+                self.history.append(UnifiedMessage(
+                    role=MessageRole.TOOL,
+                    content=error_msg,
+                    tool_call_id=tool_call.id,
+                    name=tool_name,
+                ))
+
+    def clear_history(self) -> None:
+        """Clear conversation history, keeping only the system prompt."""
+        system_msg = self.history[0] if self.history else None
+        self.history = []
+        if system_msg and system_msg.role == MessageRole.SYSTEM:
+            self.history.append(system_msg)
+
+    def get_history(self) -> list[dict]:
+        """Get conversation history as list of dicts.
+
+        Returns:
+            List of message dictionaries
+        """
+        return [msg.to_dict() for msg in self.history]
 
     def visualize(self) -> str:
+        """Generate a Mermaid diagram of the agent structure.
+
+        Returns:
+            Mermaid diagram string
+        """
         from .visualizer import AgentVisualizer
         visualizer = AgentVisualizer(list(self.tools.values()))
         return visualizer.generate_mermaid_graph()
