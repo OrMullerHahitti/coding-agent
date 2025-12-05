@@ -1,0 +1,233 @@
+"""Main entry point for the coding agent CLI.
+
+Handles provider selection, tool configuration, and the main interaction loop.
+"""
+
+import os
+import sys
+
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+import argparse
+import yaml
+
+from .agent import CodingAgent
+from .exceptions import (
+    AgentError,
+    AuthenticationError,
+    RateLimitError,
+    ProviderUnavailableError,
+)
+
+
+def load_config() -> dict:
+    """Load configuration from config.yaml if it exists."""
+    try:
+        with open("config.yaml", "r") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+
+
+def get_provider_and_model(args: argparse.Namespace, config: dict) -> tuple[str | None, str | None]:
+    """Determine the provider and model to use.
+
+    Priority order:
+    1. CLI arguments
+    2. Config file
+    3. Environment variable
+    4. Auto-detection based on available API keys
+    """
+    llm_config = config.get("llm", {})
+
+    provider = args.provider or llm_config.get("provider") or os.getenv("LLM_PROVIDER")
+    model = args.model or llm_config.get("model")
+
+    # Auto-detect provider based on available API keys
+    if not provider:
+        if os.getenv("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif os.getenv("OPENAI_API_KEY"):
+            provider = "openai"
+        elif os.getenv("TOGETHER_API_KEY"):
+            provider = "together"
+        elif os.getenv("GOOGLE_API_KEY"):
+            provider = "google"
+
+    return provider, model
+
+
+def create_client(provider: str, model: str | None):
+    """Create the appropriate LLM client.
+
+    Args:
+        provider: The provider name (anthropic, openai, together, google)
+        model: Optional model override
+
+    Returns:
+        An initialized LLM client
+
+    Raises:
+        ValueError: If API key is not set or provider is unknown
+    """
+    if provider == "anthropic":
+        from .clients.anthropic import AnthropicClient
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set in environment")
+        return AnthropicClient(
+            api_key=api_key,
+            model=model or "claude-3-5-sonnet-20240620"
+        )
+
+    elif provider == "openai":
+        from .clients.openai import OpenAIClient
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not set in environment")
+        return OpenAIClient(
+            api_key=api_key,
+            model=model or "gpt-4o"
+        )
+
+    elif provider == "together":
+        from .clients.together import TogetherClient
+        api_key = os.getenv("TOGETHER_API_KEY")
+        if not api_key:
+            raise ValueError("TOGETHER_API_KEY not set in environment")
+        return TogetherClient(
+            api_key=api_key,
+            model=model or "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+        )
+
+    elif provider == "google":
+        from .clients.google import GoogleClient
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY not set in environment")
+        return GoogleClient(
+            api_key=api_key,
+            model=model or "gemini-1.5-pro-latest"
+        )
+
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+def create_tools() -> list:
+    """Create and return the list of available tools."""
+    from .tools.calculator import CalculatorTool
+    from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
+    from .tools.system import RunCommandTool
+    from .tools.python_repl import PythonREPLTool
+    from .tools.search import TavilySearchTool
+
+    return [
+        CalculatorTool(),
+        ListDirectoryTool(),
+        ReadFileTool(),
+        WriteFileTool(),
+        RunCommandTool(),
+        PythonREPLTool(),
+        TavilySearchTool(),
+    ]
+
+
+def main():
+    """Main entry point for the coding agent CLI."""
+    parser = argparse.ArgumentParser(description="Coding Agent CLI")
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Generate a Mermaid graph of the agent structure"
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Enable streaming responses"
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["together", "openai", "anthropic", "google"],
+        help="LLM provider to use (overrides config and auto-detection)"
+    )
+    parser.add_argument(
+        "--model",
+        help="LLM model to use (overrides config)"
+    )
+    args = parser.parse_args()
+
+    config = load_config()
+    provider, model = get_provider_and_model(args, config)
+
+    if not provider:
+        print("Error: No LLM provider specified and no API keys found.")
+        print("Please set one of the following:")
+        print("  - LLM_PROVIDER environment variable")
+        print("  - provider in config.yaml")
+        print("  - ANTHROPIC_API_KEY, OPENAI_API_KEY, TOGETHER_API_KEY, or GOOGLE_API_KEY")
+        sys.exit(1)
+
+    print(f"Using provider: {provider}")
+    if model:
+        print(f"Using model: {model}")
+
+    try:
+        client = create_client(provider, model)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    # Initialize tools
+    tools = create_tools()
+
+    # Format the system prompt with tool descriptions
+    from .prompts import SYSTEM_PROMPT
+    tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in tools])
+    formatted_system_prompt = SYSTEM_PROMPT.format(tool_descriptions=tool_descriptions)
+
+    agent = CodingAgent(client, tools, system_prompt=formatted_system_prompt)
+
+    if args.visualize:
+        print(agent.visualize())
+        return
+
+    print("Coding Agent Initialized. Type 'exit' to quit.")
+    print("-" * 50)
+
+    while True:
+        try:
+            user_input = input("You: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nGoodbye!")
+            break
+
+        if user_input.lower() in ("exit", "quit"):
+            print("Goodbye!")
+            break
+
+        if not user_input.strip():
+            continue
+
+        try:
+            agent.run(user_input, stream=args.stream)
+        except AuthenticationError as e:
+            print(f"Authentication error: {e}")
+            print("Please check your API key.")
+        except RateLimitError as e:
+            print(f"Rate limit exceeded: {e}")
+            print("Please wait a moment and try again.")
+        except ProviderUnavailableError as e:
+            print(f"Provider unavailable: {e}")
+            print("Please try again later.")
+        except AgentError as e:
+            print(f"Agent error: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {type(e).__name__}: {e}")
+
+
+if __name__ == "__main__":
+    main()
