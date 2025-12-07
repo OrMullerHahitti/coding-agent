@@ -105,3 +105,16 @@ class BaseLLMClient(ABC):
             StreamChunk with delta content/tool_call updates
         """
         pass
+
+    def format_system_prompt(self, prompt: str, tools: list[BaseTool]) -> str:
+        """Format the system prompt with tool descriptions.
+
+        Args:
+            prompt: The raw system prompt template
+            tools: List of available tools
+
+        Returns:
+            Formatted system prompt
+        """
+        tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in tools])
+        return prompt.format(tool_descriptions=tool_descriptions)

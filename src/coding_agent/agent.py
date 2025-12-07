@@ -51,16 +51,19 @@ class CodingAgent:
         self.client = client
         self.tools = {tool.name: tool for tool in tools}
         self.tool_list = tools
+        
+        formatted_prompt = self.client.format_system_prompt(system_prompt, tools)
         self.history: list[UnifiedMessage] = [
-            UnifiedMessage(role=MessageRole.SYSTEM, content=system_prompt)
+            UnifiedMessage(role=MessageRole.SYSTEM, content=formatted_prompt)
         ]
 
-    def run(self, user_input: str, stream: bool = False) -> str | None:
+    def run(self, user_input: str, stream: bool = False, verbose: bool = False) -> str | None:
         """Run a conversation turn with the given user input.
 
         Args:
             user_input: The user's message
             stream: Whether to stream the response
+            verbose: Whether to print verbose output
 
         Returns:
             The final assistant response text, or None if streaming
@@ -79,11 +82,11 @@ class CodingAgent:
             if stream:
                 # Handle streaming response
                 assert isinstance(response, Iterator)
-                final_message = self._handle_stream(response)
+                final_message = self._handle_stream(response, verbose=verbose)
                 self.history.append(final_message)
 
                 if final_message.tool_calls:
-                    self._execute_tool_calls(final_message.tool_calls)
+                    self._execute_tool_calls(final_message.tool_calls, verbose=verbose)
                 else:
                     return None  # Already printed during streaming
             else:
@@ -92,16 +95,17 @@ class CodingAgent:
                 self.history.append(response.message)
 
                 if response.message.tool_calls:
-                    self._execute_tool_calls(response.message.tool_calls)
+                    self._execute_tool_calls(response.message.tool_calls, verbose=verbose)
                 else:
                     print(f"Agent: {response.message.content}")
                     return response.message.content
 
-    def _handle_stream(self, stream: Iterator[StreamChunk]) -> UnifiedMessage:
+    def _handle_stream(self, stream: Iterator[StreamChunk], verbose: bool = False) -> UnifiedMessage:
         """Handle a streaming response and reconstruct the message.
 
         Args:
             stream: Iterator of StreamChunk objects
+            verbose: Whether to print verbose output
 
         Returns:
             The reconstructed UnifiedMessage
@@ -152,17 +156,25 @@ class CodingAgent:
                 arguments=arguments,
             ))
 
+        if verbose and tool_calls:
+            print(f"\n[Verbose] Generated {len(tool_calls)} tool calls:")
+            for tc in tool_calls:
+                print(f"  - ID: {tc.id}")
+                print(f"    Name: {tc.name}")
+                print(f"    Arguments: {tc.arguments}")
+
         return UnifiedMessage(
             role=MessageRole.ASSISTANT,
             content=content if content else None,
             tool_calls=tool_calls if tool_calls else None,
         )
 
-    def _execute_tool_calls(self, tool_calls: list[ToolCall]) -> None:
+    def _execute_tool_calls(self, tool_calls: list[ToolCall], verbose: bool = False) -> None:
         """Execute tool calls and add results to history.
 
         Args:
             tool_calls: List of tool calls to execute
+            verbose: Whether to print verbose output
         """
         for tool_call in tool_calls:
             tool_name = tool_call.name
@@ -179,10 +191,17 @@ class CodingAgent:
                 continue
 
             tool = self.tools[tool_name]
-            print(f"Executing tool: {tool_name} with args: {tool_call.arguments}")
+            if verbose:
+                print(f"[Verbose] Executing tool '{tool_name}' (ID: {tool_call.id})")
+                print(f"  Args: {tool_call.arguments}")
+            else:
+                print(f"Executing tool: {tool_name} with args: {tool_call.arguments}")
 
             try:
                 result = tool.execute(**tool_call.arguments)
+                if verbose:
+                    print(f"  Result: {result}")
+                
                 self.history.append(UnifiedMessage(
                     role=MessageRole.TOOL,
                     content=str(result),

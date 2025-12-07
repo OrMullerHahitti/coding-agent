@@ -31,6 +31,11 @@ You have access to a specific set of tools. You must use them strategically.
 ## 5. Calculator (`calculator`)
 * **Use Case:** Only use this for very simple arithmetic (+, -, *, /). For anything involving exponents, roots, or statistics, use `python_repl`.
 
+## 6. Ask User (`ask_user`)
+* **Use Case:** Use this tool to ask the user for clarification, confirmation, or additional information.
+* **Stop & Ask:** If you are stuck, if the request is ambiguous, or if a critical file is missing, do NOT guess. Stop and ask the user.
+* **Confirmation:** Before performing destructive actions (like deleting many files), ask for confirmation if not explicitly authorized.
+
 # OPERATIONAL FRAMEWORK (ReAct Pattern)
 For every request, follow this mental process:
 

@@ -150,6 +150,11 @@ def main():
         help="Enable streaming responses"
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output"
+    )
+    parser.add_argument(
         "--provider",
         choices=["together", "openai", "anthropic", "google"],
         help="LLM provider to use (overrides config and auto-detection)"
@@ -181,15 +186,27 @@ def main():
         print(f"Error: {e}")
         sys.exit(1)
 
-    # Initialize tools
-    tools = create_tools()
-
-    # Format the system prompt with tool descriptions
+    # Initialize tools here when we have them
+    from .tools.calculator import CalculatorTool
+    from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
+    from .tools.system import RunCommandTool
+    from .tools.python_repl import PythonREPLTool
+    from .tools.search import TavilySearchTool
+    from .tools.ask_user import AskUserTool
     from .prompts import SYSTEM_PROMPT
-    tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in tools])
-    formatted_system_prompt = SYSTEM_PROMPT.format(tool_descriptions=tool_descriptions)
 
-    agent = CodingAgent(client, tools, system_prompt=formatted_system_prompt)
+    tools = [
+        CalculatorTool(),
+        ListDirectoryTool(),
+        ReadFileTool(),
+        WriteFileTool(),
+        RunCommandTool(),
+        PythonREPLTool(),
+        TavilySearchTool(),
+        AskUserTool(),
+    ]
+
+    agent = CodingAgent(client, tools, system_prompt=SYSTEM_PROMPT)
 
     if args.visualize:
         print(agent.visualize())
@@ -211,9 +228,8 @@ def main():
 
         if not user_input.strip():
             continue
-
         try:
-            agent.run(user_input, stream=args.stream)
+            agent.run(user_input, stream=args.stream, verbose=args.verbose)
         except AuthenticationError as e:
             print(f"Authentication error: {e}")
             print("Please check your API key.")

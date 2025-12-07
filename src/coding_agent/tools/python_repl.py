@@ -6,6 +6,7 @@ Executes Python code in a sandboxed environment with:
 - Persistent namespace for multi-turn interactions
 """
 
+from pprint import pprint
 import ast
 import sys
 import io

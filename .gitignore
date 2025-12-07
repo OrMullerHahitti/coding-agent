@@ -41,3 +41,7 @@ venv.bak/
 .pytest_cache/
 .coverage
 htmlcov/
+helpers/tool_schema.md
+
+# Local configuration
+config.yaml
