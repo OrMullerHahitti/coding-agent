@@ -46,13 +46,16 @@ class AnthropicClient(BaseLLMClient):
         self,
         api_key: str | None = None,
         model: str = "claude-3-5-sonnet-20240620",
+        client_config: dict | None = None,
     ):
         """Initialize the Anthropic client.
 
         Args:
             api_key: Anthropic API key. Defaults to ANTHROPIC_API_KEY env var.
             model: Model to use. Defaults to Claude 3.5 Sonnet.
+            client_config: Optional dictionary of configuration parameters.
         """
+        super().__init__(client_config)
         self.client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
         self.model = model
 
