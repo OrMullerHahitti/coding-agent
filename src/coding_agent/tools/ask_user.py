@@ -1,32 +1,78 @@
-"""Human-in-the-loop tool for requesting user input."""
+"""Human-in-the-loop tool for requesting user input.
+
+This tool supports two modes:
+1. Interrupt mode (default): Raises InterruptRequested for framework-agnostic handling
+2. Callback mode: Uses a provided callback for synchronous environments (CLI)
+"""
 
 from typing import Any, Callable
 
-
-# default callback uses input() for CLI usage
-def default_input_callback(question: str) -> str:
-    """Default callback that uses stdin input."""
-    print(f"\n[Agent needs input]: {question}")
-    return input("Your answer: ")
+from ..exceptions import InterruptRequested
 
 
 class AskUserTool:
     """Tool that allows the agent to ask the user for clarification.
-    
-    The input callback can be customized for different deployment scenarios:
-    - CLI: Use the default `input()` based callback
-    - Web: Provide a callback that sends a websocket message and waits for response
-    - API: Provide a callback that queues the question and polls for answer
+
+    The tool supports two operational modes:
+
+    1. **Interrupt Mode** (default, `use_interrupt=True`):
+       - Raises `InterruptRequested` exception when executed
+       - Agent loop catches this and returns control to the caller
+       - Caller provides the response and resumes the agent
+       - Works in any environment: CLI, web, API, async frameworks
+
+    2. **Callback Mode** (`use_interrupt=False`):
+       - Uses a provided callback function to get user input
+       - Blocks until user responds
+       - Simple for CLI applications but not suitable for web/API
+
+    Example (Interrupt Mode):
+        ```python
+        tool = AskUserTool(use_interrupt=True)
+        agent = CodingAgent(client, [tool])
+
+        result = agent.run("help me with something")
+        if result.is_interrupted:
+            user_response = get_user_input(result.interrupt.question)
+            result = agent.resume(result.interrupt.tool_call_id, user_response)
+        ```
+
+    Example (Callback Mode):
+        ```python
+        tool = AskUserTool(use_interrupt=False, input_callback=my_input_func)
+        agent = CodingAgent(client, [tool])
+        result = agent.run("help me with something")  # blocks for input
+        ```
     """
 
-    def __init__(self, input_callback: Callable[[str], str] | None = None):
-        """Initialize the tool with an optional custom input callback.
-        
+    # sentinel value to identify this as an interrupt-capable tool
+    INTERRUPT_TOOL = True
+
+    def __init__(
+        self,
+        use_interrupt: bool = True,
+        input_callback: Callable[[str], str] | None = None,
+    ):
+        """Initialize the tool.
+
         Args:
-            input_callback: A function that takes a question string and returns
-                           the user's response. Defaults to stdin input().
+            use_interrupt: If True, raises InterruptRequested instead of blocking.
+                          If False, uses the callback for synchronous input.
+            input_callback: Callback for synchronous mode. If not provided and
+                           use_interrupt=False, uses default stdin callback.
         """
-        self._input_callback = input_callback or default_input_callback
+        self.use_interrupt = use_interrupt
+        self._input_callback = input_callback
+
+        if not use_interrupt and not input_callback:
+            # provide default CLI callback for backward compatibility
+            self._input_callback = self._default_input_callback
+
+    @staticmethod
+    def _default_input_callback(question: str) -> str:
+        """Default callback that uses stdin input."""
+        print(f"\n[Agent needs input]: {question}")
+        return input("Your answer: ")
 
     @property
     def name(self) -> str:
@@ -54,13 +100,24 @@ class AskUserTool:
             "required": ["question"],
         }
 
-    def execute(self, question: str) -> str:
-        """Ask the user a question and return their response.
+    def execute(self, question: str, _tool_call_id: str = "") -> str:
+        """Ask the user a question.
 
         Args:
             question: The question to ask the user.
+            _tool_call_id: Internal parameter passed by agent for interrupt handling.
 
         Returns:
-            The user's response.
+            The user's response (callback mode only).
+
+        Raises:
+            InterruptRequested: When in interrupt mode, signals that user input is needed.
         """
+        if self.use_interrupt:
+            raise InterruptRequested(
+                tool_name=self.name,
+                tool_call_id=_tool_call_id,
+                question=question,
+            )
+
         return self._input_callback(question)

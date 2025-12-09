@@ -11,6 +11,40 @@ class AgentError(Exception):
 
 
 # =============================================================================
+# Control Flow - Not errors, but control flow mechanisms
+# =============================================================================
+
+class InterruptRequested(AgentError):
+    """Raised when a tool requests an interrupt for user input.
+
+    This is a control flow mechanism, not an error. It signals that the
+    agent should pause execution and wait for user input before continuing.
+
+    Used by tools like AskUserTool to implement human-in-the-loop patterns
+    without blocking the execution thread.
+
+    Attributes:
+        tool_name: Name of the tool requesting the interrupt
+        tool_call_id: ID of the tool call for resumption
+        question: The question to ask the user
+        context: Optional additional context
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        question: str,
+        context: dict | None = None,
+    ):
+        self.tool_name = tool_name
+        self.tool_call_id = tool_call_id
+        self.question = question
+        self.context = context
+        super().__init__(f"Interrupt requested by {tool_name}: {question}")
+
+
+# =============================================================================
 # Client Errors - Issues with LLM API interactions
 # =============================================================================
 
