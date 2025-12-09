@@ -54,14 +54,21 @@ class GoogleClient(BaseLLMClient):
         self,
         api_key: str | None = None,
         model: str = "gemini-1.5-pro-latest",
+        client_config: dict | None = None,
     ):
-        """Initialize the Google Gemini client.
+        """Initialize the Google client.
 
         Args:
             api_key: Google API key. Defaults to GOOGLE_API_KEY env var.
-            model: Model to use. Defaults to Gemini 1.5 Pro.
+            model: Model to use. Defaults to gemini-1.5-pro.
+            client_config: Optional dictionary of configuration parameters.
         """
-        api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        super().__init__(client_config)
+        if not api_key:
+            api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("Google API key not found")
+            
         genai.configure(api_key=api_key)
         self.model_name = model
 

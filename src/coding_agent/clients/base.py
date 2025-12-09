@@ -29,6 +29,15 @@ class BaseLLMClient(ABC):
     handling is encapsulated within each client implementation.
     """
 
+    def __init__(self, client_config: dict | None = None):
+        """Initialize the client.
+        
+        Args:
+            client_config: Optional dictionary of configuration parameters
+                           (e.g. temperature, max_tokens, etc.)
+        """
+        self.client_config = client_config or {}
+
     @abstractmethod
     def generate(
         self,

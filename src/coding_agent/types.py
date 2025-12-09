@@ -5,7 +5,7 @@ All clients convert their provider-specific formats to/from these types.
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, auto
 from typing import Any, Iterator
 
 
@@ -66,6 +66,7 @@ class UnifiedMessage:
     """
     role: MessageRole
     content: str | None = None
+    reasoning_content: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
     name: str | None = None
@@ -75,6 +76,8 @@ class UnifiedMessage:
         result: dict[str, Any] = {"role": self.role.value}
         if self.content is not None:
             result["content"] = self.content
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
         if self.tool_calls:
             result["tool_calls"] = [
                 {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
@@ -113,9 +116,68 @@ class StreamChunk:
         finish_reason: Set on the final chunk
     """
     delta_content: str | None = None
+    delta_reasoning: str | None = None
     delta_tool_call: PartialToolCall | None = None
     finish_reason: FinishReason | None = None
 
 
 # Type alias for streaming responses
 StreamIterator = Iterator[StreamChunk]
+
+
+# ==================== agent state types ====================
+
+
+class AgentState(Enum):
+    """State of the agent execution."""
+    RUNNING = auto()
+    INTERRUPTED = auto()
+    COMPLETED = auto()
+    ERROR = auto()
+
+
+@dataclass
+class InterruptInfo:
+    """Information about an interrupt requiring user input.
+
+    Attributes:
+        tool_name: Name of the tool that triggered the interrupt
+        tool_call_id: ID of the tool call (for resumption)
+        question: The question to ask the user
+        context: Optional additional context
+    """
+    tool_name: str
+    tool_call_id: str
+    question: str
+    context: dict[str, Any] | None = None
+
+
+@dataclass
+class AgentRunResult:
+    """Result of an agent run, which may be complete or interrupted.
+
+    Attributes:
+        state: Current state of the agent
+        content: Final response content (if completed)
+        interrupt: Interrupt information (if interrupted)
+        error: Error message (if error state)
+    """
+    state: AgentState
+    content: str | None = None
+    interrupt: InterruptInfo | None = None
+    error: str | None = None
+
+    @property
+    def is_interrupted(self) -> bool:
+        """Check if the agent is waiting for user input."""
+        return self.state == AgentState.INTERRUPTED
+
+    @property
+    def is_completed(self) -> bool:
+        """Check if the agent has completed its task."""
+        return self.state == AgentState.COMPLETED
+
+    @property
+    def is_error(self) -> bool:
+        """Check if the agent encountered an error."""
+        return self.state == AgentState.ERROR

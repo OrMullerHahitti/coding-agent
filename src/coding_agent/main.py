@@ -8,7 +8,7 @@ import sys
 
 from dotenv import load_dotenv
 
-# Load environment variables
+# load environment variables
 load_dotenv()
 
 import argparse
@@ -46,7 +46,7 @@ def get_provider_and_model(args: argparse.Namespace, config: dict) -> tuple[str 
     provider = args.provider or llm_config.get("provider") or os.getenv("LLM_PROVIDER")
     model = args.model or llm_config.get("model")
 
-    # Auto-detect provider based on available API keys
+    # auto-detect provider based on available API keys
     if not provider:
         if os.getenv("ANTHROPIC_API_KEY"):
             provider = "anthropic"
@@ -60,12 +60,13 @@ def get_provider_and_model(args: argparse.Namespace, config: dict) -> tuple[str 
     return provider, model
 
 
-def create_client(provider: str, model: str | None):
+def create_client(provider: str, model: str | None, client_config: dict | None = None):
     """Create the appropriate LLM client.
 
     Args:
         provider: The provider name (anthropic, openai, together, google)
         model: Optional model override
+        client_config: Optional configuration for the client
 
     Returns:
         An initialized LLM client
@@ -80,7 +81,8 @@ def create_client(provider: str, model: str | None):
             raise ValueError("ANTHROPIC_API_KEY not set in environment")
         return AnthropicClient(
             api_key=api_key,
-            model=model or "claude-3-5-sonnet-20240620"
+            model=model or "claude-3-5-sonnet-20240620",
+            client_config=client_config
         )
 
     elif provider == "openai":
@@ -90,7 +92,8 @@ def create_client(provider: str, model: str | None):
             raise ValueError("OPENAI_API_KEY not set in environment")
         return OpenAIClient(
             api_key=api_key,
-            model=model or "gpt-4o"
+            model=model or "gpt-4o",
+            client_config=client_config
         )
 
     elif provider == "together":
@@ -100,7 +103,8 @@ def create_client(provider: str, model: str | None):
             raise ValueError("TOGETHER_API_KEY not set in environment")
         return TogetherClient(
             api_key=api_key,
-            model=model or "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+            model=model or "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+            client_config=client_config
         )
 
     elif provider == "google":
@@ -110,30 +114,12 @@ def create_client(provider: str, model: str | None):
             raise ValueError("GOOGLE_API_KEY not set in environment")
         return GoogleClient(
             api_key=api_key,
-            model=model or "gemini-1.5-pro-latest"
+            model=model or "gemini-1.5-pro-latest",
+            client_config=client_config
         )
 
     else:
         raise ValueError(f"Unknown provider: {provider}")
-
-
-def create_tools() -> list:
-    """Create and return the list of available tools."""
-    from .tools.calculator import CalculatorTool
-    from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
-    from .tools.system import RunCommandTool
-    from .tools.python_repl import PythonREPLTool
-    from .tools.search import TavilySearchTool
-
-    return [
-        CalculatorTool(),
-        ListDirectoryTool(),
-        ReadFileTool(),
-        WriteFileTool(),
-        RunCommandTool(),
-        PythonREPLTool(),
-        TavilySearchTool(),
-    ]
 
 
 def main():
@@ -181,19 +167,26 @@ def main():
         print(f"Using model: {model}")
 
     try:
-        client = create_client(provider, model)
+        # extract client config parameters (excluding provider/model which are handled separately)
+        llm_config = config.get("llm", {})
+        client_config = {
+            k: v for k, v in llm_config.items()
+            if k not in ["provider", "model"]
+        }
+
+        client = create_client(provider, model, client_config)
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
 
-    # Initialize tools here when we have them
+    # initialize tools
     from .tools.calculator import CalculatorTool
     from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
     from .tools.system import RunCommandTool
     from .tools.python_repl import PythonREPLTool
     from .tools.search import TavilySearchTool
     from .tools.ask_user import AskUserTool
-    from .prompts import SYSTEM_PROMPT
+    from .prompts import SYSTEM_PROMPT, THOUGHT_SUFFIX
 
     tools = [
         CalculatorTool(),
@@ -203,10 +196,14 @@ def main():
         RunCommandTool(),
         PythonREPLTool(),
         TavilySearchTool(),
-        AskUserTool(),
+        AskUserTool(use_interrupt=True),  # use interrupt mode
     ]
 
-    agent = CodingAgent(client, tools, system_prompt=SYSTEM_PROMPT)
+    system_prompt = SYSTEM_PROMPT
+    if args.verbose:
+        system_prompt += THOUGHT_SUFFIX
+
+    agent = CodingAgent(client, tools, system_prompt=system_prompt)
 
     if args.visualize:
         print(agent.visualize())
@@ -228,8 +225,25 @@ def main():
 
         if not user_input.strip():
             continue
+
         try:
-            agent.run(user_input, stream=args.stream, verbose=args.verbose)
+            result = agent.run(user_input, stream=args.stream, verbose=args.verbose)
+
+            # handle interrupts (ask_user tool)
+            while result.is_interrupted:
+                try:
+                    user_response = input(f"\n[Agent asks]: {result.interrupt.question}\nYour answer: ")
+                except (KeyboardInterrupt, EOFError):
+                    print("\nInterrupt cancelled.")
+                    break
+
+                result = agent.resume(
+                    result.interrupt.tool_call_id,
+                    user_response,
+                    stream=args.stream,
+                    verbose=args.verbose,
+                )
+
         except AuthenticationError as e:
             print(f"Authentication error: {e}")
             print("Please check your API key.")
