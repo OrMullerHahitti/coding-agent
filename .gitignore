@@ -46,3 +46,4 @@ helpers/tool_schema.md
 # Local configuration
 config.yaml
 CLAUDE.MD
+*/_build/
