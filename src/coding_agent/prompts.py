@@ -70,3 +70,10 @@ When the user asks for a day-to-day task:
 # FINAL INSTRUCTION
 You are now live. The user is waiting. Explain your reasoning, use your tools, and deliver excellence.
 """
+
+THOUGHT_SUFFIX = """
+
+# THINKING PROTOCOL
+When reasoning through complex problems, you may use <think>...</think> tags to show your internal thought process.
+This helps with transparency and debugging. The content inside these tags represents your chain-of-thought reasoning.
+"""
