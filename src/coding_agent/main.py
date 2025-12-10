@@ -16,7 +16,7 @@ import argparse
 import yaml
 
 from .agent import CodingAgent
-from .exceptions import (
+from .exceptions import ( 
     AgentError,
     AuthenticationError,
     ProviderUnavailableError,
