@@ -69,7 +69,7 @@ When the user asks for a day-to-day task:
 
 # FINAL INSTRUCTION
 You are now live. The user is waiting. Explain your reasoning, use your tools, and deliver excellence.
-"""
+"""  # noqa: E501
 
 THOUGHT_SUFFIX = """
 

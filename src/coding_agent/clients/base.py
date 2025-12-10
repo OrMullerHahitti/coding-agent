@@ -30,8 +30,7 @@ class BaseLLMClient(ABC):
     """
 
     def __init__(self, client_config: dict | None = None):
-        """Initialize the client.
-        
+        """Initialize the client. 
         Args:
             client_config: Optional dictionary of configuration parameters
                            (e.g. temperature, max_tokens, etc.)
@@ -55,7 +54,6 @@ class BaseLLMClient(ABC):
         Returns:
             UnifiedResponse for non-streaming, Iterator[StreamChunk] for streaming
         """
-        pass
 
     @abstractmethod
     def _convert_messages(self, messages: list[UnifiedMessage]) -> Any:
@@ -72,7 +70,6 @@ class BaseLLMClient(ABC):
         Returns:
             Provider-specific message format
         """
-        pass
 
     @abstractmethod
     def _convert_tools(self, tools: list[BaseTool]) -> list[dict[str, Any]]:
@@ -89,7 +86,6 @@ class BaseLLMClient(ABC):
         Returns:
             Provider-specific tool definitions
         """
-        pass
 
     @abstractmethod
     def _parse_response(self, response: Any) -> UnifiedResponse:
@@ -101,7 +97,7 @@ class BaseLLMClient(ABC):
         Returns:
             UnifiedResponse with normalized message and metadata
         """
-        pass
+
 
     @abstractmethod
     def _parse_stream_chunk(self, chunk: Any) -> StreamChunk:
@@ -113,7 +109,6 @@ class BaseLLMClient(ABC):
         Returns:
             StreamChunk with delta content/tool_call updates
         """
-        pass
 
     def format_system_prompt(self, prompt: str, tools: list[BaseTool]) -> str:
         """Format the system prompt with tool descriptions.

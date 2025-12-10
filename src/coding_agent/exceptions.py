@@ -7,7 +7,6 @@ organized into logical categories: client errors, tool errors, and security erro
 
 class AgentError(Exception):
     """Base exception for all agent errors."""
-    pass
 
 
 # =============================================================================
@@ -50,12 +49,10 @@ class InterruptRequested(AgentError):
 
 class ClientError(AgentError):
     """Base class for LLM client errors."""
-    pass
 
 
 class AuthenticationError(ClientError):
     """API key is invalid or missing."""
-    pass
 
 
 class RateLimitError(ClientError):
@@ -91,12 +88,12 @@ class ModelNotFoundError(ClientError):
 
 class ProviderUnavailableError(ClientError):
     """Provider API is temporarily unavailable."""
-    pass
+
 
 
 class InvalidResponseError(ClientError):
     """Response from provider could not be parsed."""
-    pass
+
 
 
 # =============================================================================
@@ -105,7 +102,7 @@ class InvalidResponseError(ClientError):
 
 class ToolError(AgentError):
     """Base class for tool execution errors."""
-    pass
+
 
 
 class ToolNotFoundError(ToolError):

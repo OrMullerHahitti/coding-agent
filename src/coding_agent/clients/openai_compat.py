@@ -70,7 +70,6 @@ class OpenAICompatibleClient(BaseLLMClient):
         Returns:
             Set of supported parameter names (e.g., temperature, max_tokens)
         """
-        pass
 
     @abstractmethod
     def _get_default_api_args(self) -> dict[str, Any]:
@@ -79,7 +78,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         Returns:
             Dict of default arguments (e.g., max_tokens for Together)
         """
-        pass
+
 
     @abstractmethod
     @contextmanager
@@ -91,7 +90,6 @@ class OpenAICompatibleClient(BaseLLMClient):
         - RateLimitError
         - ProviderUnavailableError
         """
-        pass
 
     # ==================== shared implementations ====================
 

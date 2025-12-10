@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.abspath('../src'))
 
 # -- Project information -----------------------------------------------------
 project = 'Coding Agent'
-copyright = '2025, Coding Agent Team'
-author = 'Coding Agent Team'
+copyright = '2025, Or Muller'
+author = 'Or Muller'
 release = '0.1.0'
 
 # -- General configuration ---------------------------------------------------

@@ -12,14 +12,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import argparse
+
 import yaml
 
 from .agent import CodingAgent
 from .exceptions import (
     AgentError,
     AuthenticationError,
-    RateLimitError,
     ProviderUnavailableError,
+    RateLimitError,
 )
 
 
@@ -180,13 +181,13 @@ def main():
         sys.exit(1)
 
     # initialize tools
+    from .prompts import SYSTEM_PROMPT, THOUGHT_SUFFIX
+    from .tools.ask_user import AskUserTool
     from .tools.calculator import CalculatorTool
     from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
-    from .tools.system import RunCommandTool
     from .tools.python_repl import PythonREPLTool
     from .tools.search import TavilySearchTool
-    from .tools.ask_user import AskUserTool
-    from .prompts import SYSTEM_PROMPT, THOUGHT_SUFFIX
+    from .tools.system import RunCommandTool
 
     tools = [
         CalculatorTool(),

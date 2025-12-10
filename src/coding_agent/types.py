@@ -4,7 +4,7 @@ These types provide a provider-agnostic interface for LLM interactions.
 All clients convert their provider-specific formats to/from these types.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Iterator
 
