@@ -17,6 +17,7 @@ Supported models:
 - gemini-2.5-flash-preview
 """
 
+import logging
 import os
 from typing import Any, Iterator
 
@@ -57,6 +58,8 @@ SUPPORTED_CONFIG_KEYS = {
     # function calling
     "function_calling_mode",
 }
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleClient(BaseLLMClient):
@@ -339,8 +342,9 @@ class GoogleClient(BaseLLMClient):
             if candidate.finish_reason:
                 return StreamChunk(finish_reason=FinishReason.STOP)
 
-        except Exception:
-            pass
+        except Exception as e:
+            # log at debug level since stream chunks may have partial/empty data
+            logger.debug(f"failed to parse stream chunk: {e}")
 
         return StreamChunk()
 
