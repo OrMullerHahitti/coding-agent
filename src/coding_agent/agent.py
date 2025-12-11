@@ -146,41 +146,61 @@ class CodingAgent:
                 stream=stream,
             )
 
+            # get the message from either streaming or non-streaming response
             if stream:
-                # handle streaming response
                 assert isinstance(response, Iterator)
                 handler = StreamHandler(verbose=verbose)
-                final_message = handler.process_stream(response)
-                self.history.append(final_message)
-
-                if final_message.tool_calls:
-                    try:
-                        self._execute_tool_calls(final_message.tool_calls, verbose=verbose)
-                    except InterruptRequested as e:
-                        return self._create_interrupt_result(e, final_message.tool_calls)
-                else:
-                    return AgentRunResult(
-                        state=AgentState.COMPLETED,
-                        content=final_message.content,
-                    )
+                message = handler.process_stream(response)
             else:
-                # handle non-streaming response
                 assert isinstance(response, UnifiedResponse)
-                self.history.append(response.message)
+                message = response.message
+                # print output for non-streaming (streaming prints during process)
+                self._print_response(message, verbose)
 
-                if response.message.tool_calls:
-                    try:
-                        self._execute_tool_calls(response.message.tool_calls, verbose=verbose)
-                    except InterruptRequested as e:
-                        return self._create_interrupt_result(e, response.message.tool_calls)
-                else:
-                    if verbose and response.message.reasoning_content:
-                        print(f"\n[Reasoning]: {response.message.reasoning_content}")
-                    print(f"Agent: {response.message.content}")
-                    return AgentRunResult(
-                        state=AgentState.COMPLETED,
-                        content=response.message.content,
-                    )
+            self.history.append(message)
+
+            # handle tool calls or return completed result
+            result = self._process_message(message, verbose)
+            if result is not None:
+                return result
+
+    def _print_response(self, message: UnifiedMessage, verbose: bool) -> None:
+        """Print response content for non-streaming mode.
+
+        Args:
+            message: The message to print.
+            verbose: Whether to print reasoning content.
+        """
+        if verbose and message.reasoning_content:
+            print(f"\n[Reasoning]: {message.reasoning_content}")
+        if message.content:
+            print(f"Agent: {message.content}")
+
+    def _process_message(
+        self,
+        message: UnifiedMessage,
+        verbose: bool,
+    ) -> AgentRunResult | None:
+        """Process a message, executing tool calls or returning completion.
+
+        Args:
+            message: The message to process.
+            verbose: Whether to print verbose output.
+
+        Returns:
+            AgentRunResult if complete or interrupted, None if loop should continue.
+        """
+        if message.tool_calls:
+            try:
+                self._execute_tool_calls(message.tool_calls, verbose=verbose)
+            except InterruptRequested as e:
+                return self._create_interrupt_result(e, message.tool_calls)
+            return None  # continue loop for more responses
+
+        return AgentRunResult(
+            state=AgentState.COMPLETED,
+            content=message.content,
+        )
 
     def _create_interrupt_result(
         self,
