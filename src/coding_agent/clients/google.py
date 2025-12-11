@@ -100,7 +100,7 @@ class GoogleClient(BaseLLMClient):
             raise ValueError("Google API key not found. Set GOOGLE_API_KEY or GEMINI_API_KEY env var.")
 
         self.client = genai.Client(api_key=resolved_key)
-        self.model_name = model
+        self.model = model
         self._validate_config()
 
     def _validate_config(self) -> None:
@@ -134,7 +134,7 @@ class GoogleClient(BaseLLMClient):
 
         try:
             response = self.client.models.generate_content(
-                model=self.model_name,
+                model=self.model,
                 contents=converted_messages,
                 config=config,
             )
