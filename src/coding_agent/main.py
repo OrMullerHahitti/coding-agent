@@ -16,7 +16,8 @@ import argparse
 import yaml
 
 from .agent import CodingAgent
-from .exceptions import ( 
+from .clients.factory import create_client, get_available_providers
+from .exceptions import (
     AgentError,
     AuthenticationError,
     ProviderUnavailableError,
@@ -61,68 +62,6 @@ def get_provider_and_model(args: argparse.Namespace, config: dict) -> tuple[str 
     return provider, model
 
 
-def create_client(provider: str, model: str | None, client_config: dict | None = None):
-    """Create the appropriate LLM client.
-
-    Args:
-        provider: The provider name (anthropic, openai, together, google)
-        model: Optional model override
-        client_config: Optional configuration for the client
-
-    Returns:
-        An initialized LLM client
-
-    Raises:
-        ValueError: If API key is not set or provider is unknown
-    """
-    if provider == "anthropic":
-        from .clients.anthropic import AnthropicClient
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set in environment")
-        return AnthropicClient(
-            api_key=api_key,
-            model=model or "claude-3-5-sonnet-20240620",
-            client_config=client_config
-        )
-
-    elif provider == "openai":
-        from .clients.openai import OpenAIClient
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not set in environment")
-        return OpenAIClient(
-            api_key=api_key,
-            model=model or "gpt-4o",
-            client_config=client_config
-        )
-
-    elif provider == "together":
-        from .clients.together import TogetherClient
-        api_key = os.getenv("TOGETHER_API_KEY")
-        if not api_key:
-            raise ValueError("TOGETHER_API_KEY not set in environment")
-        return TogetherClient(
-            api_key=api_key,
-            model=model or "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
-            client_config=client_config
-        )
-
-    elif provider == "google":
-        from .clients.google import GoogleClient
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY not set in environment")
-        return GoogleClient(
-            api_key=api_key,
-            model=model or "gemini-1.5-pro-latest",
-            client_config=client_config
-        )
-
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
-
-
 def main():
     """Main entry point for the coding agent CLI."""
     parser = argparse.ArgumentParser(description="Coding Agent CLI")
@@ -143,7 +82,7 @@ def main():
     )
     parser.add_argument(
         "--provider",
-        choices=["together", "openai", "anthropic", "google"],
+        choices=get_available_providers(),
         help="LLM provider to use (overrides config and auto-detection)"
     )
     parser.add_argument(
