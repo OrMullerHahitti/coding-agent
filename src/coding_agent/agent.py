@@ -4,30 +4,21 @@ The CodingAgent orchestrates conversations between the user, LLM, and tools.
 It uses unified types for all interactions, making it provider-agnostic.
 """
 
-import json
 from typing import Iterator
 
 from .clients.base import BaseLLMClient
+from .exceptions import InterruptRequested
+from .stream_handler import StreamHandler
 from .tools.base import BaseTool
 from .types import (
-    UnifiedMessage,
-    UnifiedResponse,
-    StreamChunk,
-    MessageRole,
-    FinishReason,
-    ToolCall,
-    PartialToolCall,
+    AgentRunResult,
     AgentState,
     InterruptInfo,
-    AgentRunResult,
+    MessageRole,
+    ToolCall,
+    UnifiedMessage,
+    UnifiedResponse,
 )
-from .exceptions import (
-    ToolNotFoundError,
-    ToolExecutionError,
-    ToolValidationError,
-    InterruptRequested,
-)
-from .utils.stream_parser import StreamReasoningParser
 
 
 class CodingAgent:
@@ -158,7 +149,8 @@ class CodingAgent:
             if stream:
                 # handle streaming response
                 assert isinstance(response, Iterator)
-                final_message = self._handle_stream(response, verbose=verbose)
+                handler = StreamHandler(verbose=verbose)
+                final_message = handler.process_stream(response)
                 self.history.append(final_message)
 
                 if final_message.tool_calls:
@@ -217,131 +209,6 @@ class CodingAgent:
         return AgentRunResult(
             state=AgentState.INTERRUPTED,
             interrupt=self._pending_interrupt,
-        )
-
-    def _handle_stream(self, stream: Iterator[StreamChunk], verbose: bool = False) -> UnifiedMessage:
-        """Handle a streaming response and reconstruct the message.
-
-        Args:
-            stream: Iterator of StreamChunk objects
-            verbose: Whether to print verbose output
-
-        Returns:
-            The reconstructed UnifiedMessage
-        """
-        content = ""
-        reasoning_content = ""
-        tool_calls: list[ToolCall] = []
-        tool_call_builders: dict[int, dict] = {}
-
-        has_printed_agent_prefix = False
-        is_reasoning = False
-
-        # helper for parsing embedded tags (e.g. for DeepSeek)
-        parser = StreamReasoningParser()
-
-        if not verbose:
-            print("Agent: ", end="", flush=True)
-            has_printed_agent_prefix = True
-
-        for chunk in stream:
-            # handle reasoning from direct field
-            if chunk.delta_reasoning:
-                reasoning_content += chunk.delta_reasoning
-                if verbose:
-                    if not is_reasoning:
-                        print("\n[Reasoning]: ", end="", flush=True)
-                        is_reasoning = True
-                    print(chunk.delta_reasoning, end="", flush=True)
-
-            # handle text content
-            if chunk.delta_content:
-                chunk_content = chunk.delta_content
-
-                # if we have explicit reasoning from field, just treat content as content
-                if reasoning_content and not parser.is_inside_think_tag:
-                    if not has_printed_agent_prefix:
-                        print("Agent: ", end="", flush=True)
-                        has_printed_agent_prefix = True
-                    print(chunk_content, end="", flush=True)
-                    content += chunk_content
-                    continue
-
-                # use parser to handle potential embedded tags
-                for text_part, is_part_reasoning in parser.process_chunk(chunk_content):
-                    if is_part_reasoning:
-                        # inside reasoning block
-                        reasoning_content += text_part
-                        if verbose:
-                            if not is_reasoning:
-                                print("\n[Reasoning]: ", end="", flush=True)
-                                is_reasoning = True
-                            print(text_part, end="", flush=True)
-                    else:
-                        # standard content
-                        if is_reasoning:
-                            if verbose:
-                                print("\n", end="", flush=True)
-                            is_reasoning = False
-
-                        if not has_printed_agent_prefix:
-                            print("Agent: ", end="", flush=True)
-                            has_printed_agent_prefix = True
-                        print(text_part, end="", flush=True)
-                        content += text_part
-
-            # handle tool call deltas
-            if chunk.delta_tool_call:
-                delta = chunk.delta_tool_call
-                index = delta.index
-
-                if index not in tool_call_builders:
-                    tool_call_builders[index] = {
-                        "id": delta.id,
-                        "name": delta.name,
-                        "arguments": "",
-                    }
-
-                builder = tool_call_builders[index]
-                if delta.id and not builder["id"]:
-                    builder["id"] = delta.id
-                if delta.name and not builder["name"]:
-                    builder["name"] = delta.name
-                if delta.arguments_delta:
-                    builder["arguments"] += delta.arguments_delta
-
-        print()  # newline after stream
-
-        # convert builders to ToolCall objects
-        for index, builder in tool_call_builders.items():
-            if builder["name"]:  # only add if we have a name
-                try:
-                    args = json.loads(builder["arguments"]) if builder["arguments"] else {}
-                    tool_calls.append(ToolCall(
-                        id=builder["id"] or f"call_{index}",
-                        name=builder["name"],
-                        arguments=args,
-                    ))
-                except json.JSONDecodeError:
-                    # in case of partial JSON or error, handle gracefully
-                    pass
-
-        # clean up any lingering reasoning state for display
-        if is_reasoning and verbose:
-            print()
-
-        if verbose and tool_calls:
-            print(f"\n[Verbose] Generated {len(tool_calls)} tool calls:")
-            for tc in tool_calls:
-                print(f"  - ID: {tc.id}")
-                print(f"    Name: {tc.name}")
-                print(f"    Arguments: {tc.arguments}")
-
-        return UnifiedMessage(
-            role=MessageRole.ASSISTANT,
-            content=content if content else None,
-            reasoning_content=reasoning_content if reasoning_content else None,
-            tool_calls=tool_calls if tool_calls else None,
         )
 
     def _execute_tool_calls(self, tool_calls: list[ToolCall], verbose: bool = False) -> None:
