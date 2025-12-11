@@ -23,6 +23,7 @@ from .exceptions import (
     ProviderUnavailableError,
     RateLimitError,
 )
+from .logging import setup_logging
 
 
 def load_config() -> dict:
@@ -89,7 +90,15 @@ def main():
         "--model",
         help="LLM model to use (overrides config)"
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (also settable via CODING_AGENT_LOG_LEVEL env var)"
+    )
     args = parser.parse_args()
+
+    # setup logging early
+    setup_logging(args.log_level)
 
     config = load_config()
     provider, model = get_provider_and_model(args, config)
