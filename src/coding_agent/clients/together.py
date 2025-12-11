@@ -17,7 +17,7 @@ from ..exceptions import (
     ProviderUnavailableError,
     RateLimitError,
 )
-from ..types import PartialToolCall, StreamChunk
+from ..types import PartialToolCall
 from .openai_compat import OpenAICompatibleClient
 
 
@@ -77,59 +77,31 @@ class TogetherClient(OpenAICompatibleClient):
                 raise ProviderUnavailableError(f"Together API unavailable: {e}") from e
             raise
 
-    def _parse_stream_chunk(self, chunk: Any) -> StreamChunk:
-        """Parse a single streaming chunk from Together.
+    def _parse_tool_call_from_delta(self, tc: Any) -> PartialToolCall:
+        """Parse a tool call from a stream delta.
 
         Together may return tool calls as dict or object, so we handle both.
         """
-        choice = chunk.choices[0] if chunk.choices else None
-        if not choice:
-            return StreamChunk()
-
-        delta = choice.delta
-        finish_reason = None
-
-        if choice.finish_reason:
-            finish_reason = self._map_finish_reason(choice.finish_reason)
-
-        delta_content = delta.content if hasattr(delta, "content") else None
-
-        # check for reasoning field (primary) then reasoning_content (fallback)
-        delta_reasoning = getattr(delta, "reasoning", None) or getattr(
-            delta, "reasoning_content", None
-        )
-
-        delta_tool_call = None
-        if hasattr(delta, "tool_calls") and delta.tool_calls:
-            tc = delta.tool_calls[0]
-
-            # together may return dict or object - handle both formats
-            if isinstance(tc, dict):
-                index = tc.get("index")
-                fn = tc.get("function", {})
-                if isinstance(fn, dict):
-                    name = fn.get("name")
-                    arguments = fn.get("arguments")
-                else:
-                    name = fn.name
-                    arguments = fn.arguments
-                id_ = tc.get("id")
+        # together may return dict or object - handle both formats
+        if isinstance(tc, dict):
+            index = tc.get("index")
+            fn = tc.get("function", {})
+            if isinstance(fn, dict):
+                name = fn.get("name")
+                arguments = fn.get("arguments")
             else:
-                index = tc.index
-                id_ = tc.id
-                name = tc.function.name if tc.function else None
-                arguments = tc.function.arguments if tc.function else None
+                name = fn.name
+                arguments = fn.arguments
+            id_ = tc.get("id")
+        else:
+            index = tc.index
+            id_ = tc.id
+            name = tc.function.name if tc.function else None
+            arguments = tc.function.arguments if tc.function else None
 
-            delta_tool_call = PartialToolCall(
-                index=index,
-                id=id_ if id_ else None,
-                name=name if name else None,
-                arguments_delta=arguments if arguments else None,
-            )
-
-        return StreamChunk(
-            delta_content=delta_content,
-            delta_reasoning=delta_reasoning,
-            delta_tool_call=delta_tool_call,
-            finish_reason=finish_reason,
+        return PartialToolCall(
+            index=index,
+            id=id_ if id_ else None,
+            name=name if name else None,
+            arguments_delta=arguments if arguments else None,
         )

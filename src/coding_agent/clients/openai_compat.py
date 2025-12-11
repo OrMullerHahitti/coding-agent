@@ -14,6 +14,7 @@ from ..tools.base import BaseTool
 from ..types import (
     FinishReason,
     MessageRole,
+    PartialToolCall,
     StreamChunk,
     ToolCall,
     UnifiedMessage,
@@ -251,3 +252,56 @@ class OpenAICompatibleClient(BaseLLMClient):
         """Stream response as StreamChunk iterator."""
         for chunk in response:
             yield self._parse_stream_chunk(chunk)
+
+    def _parse_stream_chunk(self, chunk: Any) -> StreamChunk:
+        """Parse a single streaming chunk.
+
+        This base implementation handles the common OpenAI-compatible format.
+        Subclasses can override for provider-specific variations.
+        """
+        choice = chunk.choices[0] if chunk.choices else None
+        if not choice:
+            return StreamChunk()
+
+        delta = choice.delta
+        finish_reason = None
+
+        if choice.finish_reason:
+            finish_reason = self._map_finish_reason(choice.finish_reason)
+
+        delta_content = delta.content if hasattr(delta, "content") else None
+
+        # check for reasoning field (primary) then reasoning_content (fallback)
+        delta_reasoning = getattr(delta, "reasoning", None) or getattr(
+            delta, "reasoning_content", None
+        )
+
+        delta_tool_call = None
+        if hasattr(delta, "tool_calls") and delta.tool_calls:
+            delta_tool_call = self._parse_tool_call_from_delta(delta.tool_calls[0])
+
+        return StreamChunk(
+            delta_content=delta_content,
+            delta_reasoning=delta_reasoning,
+            delta_tool_call=delta_tool_call,
+            finish_reason=finish_reason,
+        )
+
+    def _parse_tool_call_from_delta(self, tc: Any) -> PartialToolCall:
+        """Parse a tool call from a stream delta.
+
+        This base implementation assumes OpenAI object format.
+        Subclasses can override for providers that use different formats.
+
+        Args:
+            tc: The tool call delta from the stream.
+
+        Returns:
+            PartialToolCall with the parsed data.
+        """
+        return PartialToolCall(
+            index=tc.index,
+            id=tc.id if tc.id else None,
+            name=tc.function.name if tc.function and tc.function.name else None,
+            arguments_delta=tc.function.arguments if tc.function and tc.function.arguments else None,
+        )

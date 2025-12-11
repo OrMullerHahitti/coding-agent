@@ -17,7 +17,6 @@ from ..exceptions import (
     ProviderUnavailableError,
     RateLimitError,
 )
-from ..types import PartialToolCall, StreamChunk
 from .openai_compat import OpenAICompatibleClient
 
 
@@ -73,38 +72,4 @@ class OpenAIClient(OpenAICompatibleClient):
         except APIConnectionError as e:
             raise ProviderUnavailableError(f"OpenAI API unavailable: {e}") from e
 
-    def _parse_stream_chunk(self, chunk: Any) -> StreamChunk:
-        """Parse a single streaming chunk from OpenAI."""
-        choice = chunk.choices[0] if chunk.choices else None
-        if not choice:
-            return StreamChunk()
-
-        delta = choice.delta
-        finish_reason = None
-
-        if choice.finish_reason:
-            finish_reason = self._map_finish_reason(choice.finish_reason)
-
-        delta_content = delta.content if hasattr(delta, "content") else None
-
-        # check for reasoning field (primary) then reasoning_content (fallback)
-        delta_reasoning = getattr(delta, "reasoning", None) or getattr(
-            delta, "reasoning_content", None
-        )
-
-        delta_tool_call = None
-        if hasattr(delta, "tool_calls") and delta.tool_calls:
-            tc = delta.tool_calls[0]
-            delta_tool_call = PartialToolCall(
-                index=tc.index,
-                id=tc.id if tc.id else None,
-                name=tc.function.name if tc.function and tc.function.name else None,
-                arguments_delta=tc.function.arguments if tc.function and tc.function.arguments else None,
-            )
-
-        return StreamChunk(
-            delta_content=delta_content,
-            delta_reasoning=delta_reasoning,
-            delta_tool_call=delta_tool_call,
-            finish_reason=finish_reason,
-        )
+    # uses base class _parse_stream_chunk and _parse_tool_call_from_delta
