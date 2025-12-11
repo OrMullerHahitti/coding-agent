@@ -8,9 +8,10 @@ This tool supports two modes:
 from typing import Any, Callable
 
 from ..exceptions import InterruptRequested
+from .base import BaseTool
 
 
-class AskUserTool:
+class AskUserTool(BaseTool):
     """Tool that allows the agent to ask the user for clarification.
 
     The tool supports two operational modes:
