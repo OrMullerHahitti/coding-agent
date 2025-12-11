@@ -1,5 +1,7 @@
-from typing import Dict, Any
+from typing import Any
+
 from .base import BaseTool
+
 
 class CalculatorTool(BaseTool):
     @property
@@ -11,7 +13,7 @@ class CalculatorTool(BaseTool):
         return "Perform basic arithmetic operations. Supports addition, subtraction, multiplication, and division."
 
     @property
-    def parameters(self) -> Dict[str, Any]:
+    def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -32,7 +34,7 @@ class CalculatorTool(BaseTool):
             "required": ["operation", "a", "b"]
         }
 
-    def execute(self, operation: str, a: float, b: float) -> float:
+    def execute(self, operation: str, a: float, b: float) -> float | str:
         if operation == "add":
             return a + b
         elif operation == "subtract":
