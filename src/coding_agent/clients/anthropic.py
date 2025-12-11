@@ -340,10 +340,21 @@ class AnthropicClient(BaseLLMClient):
         return StreamChunk()
 
     def _stream_response(self, response: Any) -> Iterator[StreamChunk]:
-        """Stream response as StreamChunk iterator."""
-        with response as stream:
-            for event in stream:
-                chunk = self._parse_stream_chunk(event)
-                if (chunk.delta_content or chunk.delta_reasoning or
-                        chunk.delta_tool_call or chunk.finish_reason):
-                    yield chunk
+        """Stream response as StreamChunk iterator.
+
+        Wraps stream iteration with error handling to convert Anthropic-specific
+        errors to unified exception types.
+        """
+        try:
+            with response as stream:
+                for event in stream:
+                    chunk = self._parse_stream_chunk(event)
+                    if (chunk.delta_content or chunk.delta_reasoning or
+                            chunk.delta_tool_call or chunk.finish_reason):
+                        yield chunk
+        except AnthropicAuthError as e:
+            raise AuthenticationError(f"Anthropic authentication failed during stream: {e}") from e
+        except AnthropicRateLimitError as e:
+            raise RateLimitError("Anthropic rate limit exceeded during stream") from e
+        except APIConnectionError as e:
+            raise ProviderUnavailableError(f"Anthropic API connection lost during stream: {e}") from e

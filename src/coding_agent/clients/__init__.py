@@ -5,7 +5,7 @@ provider-specific responses to unified types.
 """
 
 from .anthropic import AnthropicClient
-from .base import BaseLLMClient
+from .base import BaseLLMClient, with_retry
 from .google import GoogleClient
 from .openai import OpenAIClient
 from .openai_compat import OpenAICompatibleClient
@@ -18,4 +18,5 @@ __all__ = [
     "TogetherClient",
     "AnthropicClient",
     "GoogleClient",
+    "with_retry",
 ]

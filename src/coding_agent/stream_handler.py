@@ -7,6 +7,7 @@ responses from LLM clients and reconstructs them into UnifiedMessage objects.
 import json
 from typing import Iterator
 
+from .logging import get_logger
 from .types import (
     MessageRole,
     StreamChunk,
@@ -14,6 +15,8 @@ from .types import (
     UnifiedMessage,
 )
 from .utils.stream_parser import StreamReasoningParser
+
+logger = get_logger(__name__)
 
 
 class StreamHandler:
@@ -208,14 +211,21 @@ class StreamHandler:
             if builder["name"]:  # only add if we have a name
                 try:
                     args = json.loads(builder["arguments"]) if builder["arguments"] else {}
-                    tool_calls.append(ToolCall(
-                        id=builder["id"] or f"call_{index}",
-                        name=builder["name"],
-                        arguments=args,
-                    ))
-                except json.JSONDecodeError:
-                    # in case of partial JSON or error, handle gracefully
-                    pass
+                except json.JSONDecodeError as e:
+                    # log the failure but still create the tool call with empty args
+                    logger.warning(
+                        f"failed to parse tool call arguments for '{builder['name']}': {e}. "
+                        f"raw arguments: {builder['arguments'][:100]}..."
+                        if len(builder["arguments"]) > 100
+                        else f"failed to parse tool call arguments for '{builder['name']}': {e}. "
+                        f"raw arguments: {builder['arguments']}"
+                    )
+                    args = {}
+                tool_calls.append(ToolCall(
+                    id=builder["id"] or f"call_{index}",
+                    name=builder["name"],
+                    arguments=args,
+                ))
         return tool_calls
 
     def _print_tool_calls_verbose(self, tool_calls: list[ToolCall]) -> None:

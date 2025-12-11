@@ -152,11 +152,12 @@ class PythonREPLTool(BaseTool):
         }
 
         # Add safe __import__ that only allows whitelisted modules
+        # note: use builtins.__import__ directly, not __builtins__ which can be dict or module
         def safe_import(name, *args, **kwargs):
             base_module = name.split(".")[0]
             if base_module not in ALLOWED_MODULES:
                 raise ImportError(f"Import of '{name}' is not allowed")
-            return __builtins__["__import__"](name, *args, **kwargs)
+            return builtins.__import__(name, *args, **kwargs)
 
         safe_builtins["__import__"] = safe_import
 

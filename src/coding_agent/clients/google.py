@@ -349,9 +349,23 @@ class GoogleClient(BaseLLMClient):
         return StreamChunk()
 
     def _stream_response(self, response: Any) -> Iterator[StreamChunk]:
-        """Stream response as StreamChunk iterator."""
-        for chunk in response:
-            parsed = self._parse_stream_chunk(chunk)
-            if (parsed.delta_content or parsed.delta_reasoning or
-                    parsed.delta_tool_call or parsed.finish_reason):
-                yield parsed
+        """Stream response as StreamChunk iterator.
+
+        Wraps stream iteration with error handling to convert Google-specific
+        errors to unified exception types.
+        """
+        try:
+            for chunk in response:
+                parsed = self._parse_stream_chunk(chunk)
+                if (parsed.delta_content or parsed.delta_reasoning or
+                        parsed.delta_tool_call or parsed.finish_reason):
+                    yield parsed
+        except ClientError as e:
+            error_msg = str(e).lower()
+            if "unauthorized" in error_msg or "authentication" in error_msg or "api key" in error_msg:
+                raise AuthenticationError(f"Google authentication failed during stream: {e}") from e
+            raise InvalidResponseError(f"Google API error during stream: {e}") from e
+        except ServerError as e:
+            raise ProviderUnavailableError(f"Google API unavailable during stream: {e}") from e
+        except APIError as e:
+            raise InvalidResponseError(f"Google API error during stream: {e}") from e

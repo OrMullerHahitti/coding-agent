@@ -5,15 +5,89 @@ the normalization methods to convert between provider-specific formats
 and the unified types.
 """
 
+import functools
+import random
+import time
 from abc import ABC, abstractmethod
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator, TypeVar
 
+from ..exceptions import ProviderUnavailableError, RateLimitError
+from ..logging import get_logger
 from ..tools.base import BaseTool
 from ..types import (
     StreamChunk,
     UnifiedMessage,
     UnifiedResponse,
 )
+
+logger = get_logger(__name__)
+
+T = TypeVar("T")
+
+
+def with_retry(
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exponential_base: float = 2.0,
+    jitter: bool = True,
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator for retrying API calls with exponential backoff.
+
+    Retries on RateLimitError and ProviderUnavailableError. Other exceptions
+    are raised immediately.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds between retries (default: 1.0)
+        max_delay: Maximum delay in seconds (default: 60.0)
+        exponential_base: Base for exponential backoff (default: 2.0)
+        jitter: Whether to add random jitter to delay (default: True)
+
+    Returns:
+        Decorated function with retry logic.
+
+    Example:
+        @with_retry(max_retries=3, initial_delay=1.0)
+        def make_api_call():
+            ...
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            last_exception: Exception | None = None
+            delay = initial_delay
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except (RateLimitError, ProviderUnavailableError) as e:
+                    last_exception = e
+                    if attempt == max_retries:
+                        logger.warning(
+                            f"max retries ({max_retries}) exceeded for {func.__name__}: {e}"
+                        )
+                        raise
+
+                    # calculate delay with optional jitter
+                    actual_delay = min(delay, max_delay)
+                    if jitter:
+                        actual_delay *= (0.5 + random.random())
+
+                    logger.info(
+                        f"retry {attempt + 1}/{max_retries} for {func.__name__} "
+                        f"after {actual_delay:.1f}s: {e}"
+                    )
+                    time.sleep(actual_delay)
+                    delay *= exponential_base
+
+            # should not reach here, but just in case
+            if last_exception:
+                raise last_exception
+            raise RuntimeError("Unexpected retry loop exit")
+
+        return wrapper
+    return decorator
 
 
 class BaseLLMClient(ABC):

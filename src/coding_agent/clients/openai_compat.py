@@ -249,9 +249,19 @@ class OpenAICompatibleClient(BaseLLMClient):
             ) from e
 
     def _stream_response(self, response: Any) -> Iterator[StreamChunk]:
-        """Stream response as StreamChunk iterator."""
-        for chunk in response:
-            yield self._parse_stream_chunk(chunk)
+        """Stream response as StreamChunk iterator.
+
+        Wraps stream iteration with error handling to convert provider-specific
+        errors to unified exception types.
+        """
+        try:
+            for chunk in response:
+                yield self._parse_stream_chunk(chunk)
+        except Exception as e:
+            # let subclass error handlers deal with provider-specific exceptions
+            # by re-raising through the error handler context
+            with self._handle_api_errors():
+                raise e
 
     def _parse_stream_chunk(self, chunk: Any) -> StreamChunk:
         """Parse a single streaming chunk.
