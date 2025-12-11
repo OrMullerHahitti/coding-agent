@@ -149,6 +149,17 @@ def main():
         print(agent.visualize())
         return
 
+    run_repl(agent, stream=args.stream, verbose=args.verbose)
+
+
+def run_repl(agent: CodingAgent, stream: bool = False, verbose: bool = False) -> None:
+    """Run the interactive REPL loop.
+
+    Args:
+        agent: The CodingAgent instance to use.
+        stream: Whether to stream responses.
+        verbose: Whether to print verbose output.
+    """
     print("Coding Agent Initialized. Type 'exit' to quit.")
     print("-" * 50)
 
@@ -167,7 +178,7 @@ def main():
             continue
 
         try:
-            result = agent.run(user_input, stream=args.stream, verbose=args.verbose)
+            result = agent.run(user_input, stream=stream, verbose=verbose)
 
             # handle interrupts (ask_user tool)
             while result.is_interrupted:
@@ -180,8 +191,8 @@ def main():
                 result = agent.resume(
                     result.interrupt.tool_call_id,
                     user_response,
-                    stream=args.stream,
-                    verbose=args.verbose,
+                    stream=stream,
+                    verbose=verbose,
                 )
 
         except AuthenticationError as e:
