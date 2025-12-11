@@ -8,12 +8,12 @@ and the unified types.
 from abc import ABC, abstractmethod
 from typing import Any, Iterator
 
+from ..tools.base import BaseTool
 from ..types import (
+    StreamChunk,
     UnifiedMessage,
     UnifiedResponse,
-    StreamChunk,
 )
-from ..tools.base import BaseTool
 
 
 class BaseLLMClient(ABC):
@@ -30,7 +30,7 @@ class BaseLLMClient(ABC):
     """
 
     def __init__(self, client_config: dict | None = None):
-        """Initialize the client. 
+        """Initialize the client.
         Args:
             client_config: Optional dictionary of configuration parameters
                            (e.g. temperature, max_tokens, etc.)
