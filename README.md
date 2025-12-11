@@ -41,7 +41,7 @@ A powerful, provider-agnostic autonomous coding agent using a ReAct (Reasoning, 
 
 1. **Clone the repository:**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/OrMullerHahitti/coding-agent/
    cd coding-agent
    ```
 
