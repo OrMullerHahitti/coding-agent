@@ -64,6 +64,11 @@ class RunCommandTool(BaseTool):
     Shell injection patterns like ;, &&, ||, |, etc. are also blocked.
     """
 
+    REQUIRES_CONFIRMATION = True
+    CONFIRMATION_MESSAGE = "Execute command: '{command}'"
+    OPERATION_TYPE = "execute"
+    CONFIRMATION_CHECK_ARG = "command"
+
     @property
     def name(self) -> str:
         return "run_command"

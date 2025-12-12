@@ -132,6 +132,7 @@ class AgentState(Enum):
     """State of the agent execution."""
     RUNNING = auto()
     INTERRUPTED = auto()
+    AWAITING_CONFIRMATION = auto()
     COMPLETED = auto()
     ERROR = auto()
 
@@ -153,24 +154,49 @@ class InterruptInfo:
 
 
 @dataclass
+class ConfirmationInfo:
+    """Information about a pending confirmation request.
+
+    Attributes:
+        tool_name: Name of the tool requiring confirmation
+        tool_call_id: ID of the tool call (for resumption)
+        message: Description of what will happen if confirmed
+        operation: Type of operation (write, execute, run_code)
+        arguments: The arguments that will be passed to the tool
+    """
+    tool_name: str
+    tool_call_id: str
+    message: str
+    operation: str
+    arguments: dict[str, Any]
+
+
+@dataclass
 class AgentRunResult:
-    """Result of an agent run, which may be complete or interrupted.
+    """Result of an agent run, which may be complete, interrupted, or awaiting confirmation.
 
     Attributes:
         state: Current state of the agent
         content: Final response content (if completed)
         interrupt: Interrupt information (if interrupted)
+        confirmation: Confirmation information (if awaiting confirmation)
         error: Error message (if error state)
     """
     state: AgentState
     content: str | None = None
     interrupt: InterruptInfo | None = None
+    confirmation: ConfirmationInfo | None = None
     error: str | None = None
 
     @property
     def is_interrupted(self) -> bool:
         """Check if the agent is waiting for user input."""
         return self.state == AgentState.INTERRUPTED
+
+    @property
+    def is_awaiting_confirmation(self) -> bool:
+        """Check if the agent is waiting for user confirmation."""
+        return self.state == AgentState.AWAITING_CONFIRMATION
 
     @property
     def is_completed(self) -> bool:

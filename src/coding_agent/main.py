@@ -204,6 +204,19 @@ def run_repl(agent: CodingAgent, stream: bool = False, verbose: bool = False) ->
                     verbose=verbose,
                 )
 
+            # handle confirmation requests
+            while result.is_awaiting_confirmation:
+                try:
+                    confirm = input(f"\n[Confirm]: {result.confirmation.message} (y/n): ").lower()
+                except (KeyboardInterrupt, EOFError):
+                    confirm = "n"
+                result = agent.resume_confirmation(
+                    result.confirmation.tool_call_id,
+                    confirmed=(confirm == "y"),
+                    stream=stream,
+                    verbose=verbose,
+                )
+
         except AuthenticationError as e:
             print(f"Authentication error: {e}")
             print("Please check your API key.")

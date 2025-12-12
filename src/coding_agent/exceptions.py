@@ -43,6 +43,38 @@ class InterruptRequested(AgentError):
         super().__init__(f"Interrupt requested by {tool_name}: {question}")
 
 
+class ConfirmationRequested(AgentError):
+    """Raised when a tool requires user confirmation before execution.
+
+    This is a control flow mechanism for dangerous operations. It signals that
+    the agent should pause and ask for user permission before proceeding.
+
+    Used by tools that modify files, execute commands, or run code.
+
+    Attributes:
+        tool_name: Name of the tool requesting confirmation
+        tool_call_id: ID of the tool call for resumption
+        message: Description of what will happen if confirmed
+        operation: Type of operation (write, execute, run_code)
+        arguments: The arguments that will be passed to the tool
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        message: str,
+        operation: str,
+        arguments: dict,
+    ):
+        self.tool_name = tool_name
+        self.tool_call_id = tool_call_id
+        self.message = message
+        self.operation = operation
+        self.arguments = arguments
+        super().__init__(f"Confirmation required for {tool_name}: {message}")
+
+
 # =============================================================================
 # Client Errors - Issues with LLM API interactions
 # =============================================================================

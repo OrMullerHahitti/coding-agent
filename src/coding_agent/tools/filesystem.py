@@ -135,6 +135,10 @@ class ReadFileTool(BaseTool):
 class WriteFileTool(BaseTool):
     """Write content to a file with path validation."""
 
+    REQUIRES_CONFIRMATION = True
+    CONFIRMATION_MESSAGE = "Write {len_content} characters to '{path}'"
+    OPERATION_TYPE = "write"
+
     @property
     def name(self) -> str:
         return "write_file"

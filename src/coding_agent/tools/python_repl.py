@@ -135,6 +135,11 @@ class PythonREPLTool(BaseTool):
     isolation (containers, etc.).
     """
 
+    REQUIRES_CONFIRMATION = True
+    CONFIRMATION_MESSAGE = "Execute Python code ({len_code} characters)"
+    OPERATION_TYPE = "run_code"
+    CONFIRMATION_CHECK_ARG = "code"
+
     def __init__(self):
         """Initialize with a fresh sandboxed namespace."""
         self.validator = PythonCodeValidator()
