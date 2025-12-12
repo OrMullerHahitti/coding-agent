@@ -23,4 +23,19 @@ __all__ = [
     "TavilySearchTool",
     "RunCommandTool",
     "PathValidator",
+    "get_default_tools",
 ]
+
+
+def get_default_tools() -> list[BaseTool]:
+    """Get the default set of tools for the agent."""
+    return [
+        CalculatorTool(),
+        ListDirectoryTool(),
+        ReadFileTool(),
+        WriteFileTool(),
+        RunCommandTool(),
+        PythonREPLTool(),
+        TavilySearchTool(),
+        AskUserTool(),
+    ]

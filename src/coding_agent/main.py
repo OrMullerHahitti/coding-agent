@@ -11,19 +11,19 @@ from dotenv import load_dotenv
 # load environment variables
 load_dotenv()
 
-import argparse
+import argparse  # noqa: E402
 
-import yaml
+import yaml  # noqa: E402
 
-from .agent import CodingAgent
-from .clients.factory import create_client, get_available_providers
-from .exceptions import (
+from .agent import CodingAgent  # noqa: E402
+from .clients.factory import create_client, get_available_providers  # noqa: E402
+from .exceptions import (  # noqa: E402
     AgentError,
     AuthenticationError,
     ProviderUnavailableError,
     RateLimitError,
 )
-from .logging import setup_logging
+from .logging import setup_logging  # noqa: E402
 
 
 def load_config() -> dict:
@@ -63,6 +63,21 @@ def get_provider_and_model(args: argparse.Namespace, config: dict) -> tuple[str 
     return provider, model
 
 
+def _start_server(host: str, port: int) -> None:
+    """Start the API server."""
+    try:
+        import uvicorn
+        from .api import app
+    except ImportError:
+        print("Error: API dependencies not installed.")
+        print("Install with: uv sync --extra api")
+        sys.exit(1)
+
+    print(f"Starting API server at http://{host}:{port}")
+    print("API docs available at http://{host}:{port}/docs")
+    uvicorn.run(app, host=host, port=port)
+
+
 def main():
     """Main entry point for the coding agent CLI."""
     parser = argparse.ArgumentParser(description="Coding Agent CLI")
@@ -95,10 +110,31 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level (also settable via CODING_AGENT_LOG_LEVEL env var)"
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Start the API server instead of CLI"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for the API server (default: 8000)"
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host for the API server (default: 127.0.0.1)"
+    )
     args = parser.parse_args()
 
     # setup logging early
     setup_logging(args.log_level)
+
+    # handle API server mode
+    if args.serve:
+        _start_server(args.host, args.port)
+        return
 
     config = load_config()
     provider, model = get_provider_and_model(args, config)
