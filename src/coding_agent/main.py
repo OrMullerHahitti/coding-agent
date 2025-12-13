@@ -120,9 +120,8 @@ def main():
     parser.add_argument(
         "--workers",
         nargs="+",
-        choices=["coder", "researcher", "reviewer"],
-        default=["coder", "researcher"],
-        help="Workers to include in multi-agent mode (default: coder researcher)"
+        default=None,
+        help="Workers to include in multi-agent mode (default: all workers from config.yaml)"
     )
     args = parser.parse_args()
 
@@ -188,7 +187,7 @@ def main():
 
     # handle multi-agent mode
     if args.multi_agent:
-        run_multi_agent(yaml_config, args.stream, args.verbose)
+        run_multi_agent(yaml_config, args.stream, args.verbose, worker_names=args.workers)
         return
 
     agent = CodingAgent(client, tools, system_prompt=system_prompt)
@@ -352,6 +351,7 @@ def run_multi_agent(
     yaml_config: dict,
     stream: bool = False,
     verbose: bool = False,
+    worker_names: list[str] | None = None,
 ) -> None:
     """Run the multi-agent system with supervisor and workers from YAML config.
 
@@ -359,6 +359,7 @@ def run_multi_agent(
         yaml_config: Configuration loaded from config.yaml.
         stream: Whether to stream responses.
         verbose: Whether to print verbose output.
+        worker_names: Optional list of worker names to include. If None, uses all configured workers.
     """
     from .multi_agent import SupervisorAgent, WorkerAgent
     from .multi_agent.prompts import (
@@ -406,6 +407,17 @@ def run_multi_agent(
     if not workers_config:
         print("Error: No workers configured in multi_agent.workers")
         return
+
+    if worker_names:
+        requested = set(worker_names)
+        configured = set(workers_config.keys())
+        unknown = sorted(requested - configured)
+        for name in unknown:
+            print(f"  Warning: Requested worker '{name}' not found in config, skipping.")
+        workers_config = {name: cfg for name, cfg in workers_config.items() if name in requested}
+        if not workers_config:
+            print("Error: None of the requested workers are configured.")
+            return
 
     # worker prompts mapping
     worker_prompts = {

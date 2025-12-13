@@ -7,8 +7,11 @@ A powerful, provider-agnostic autonomous coding agent using a ReAct (Reasoning, 
 - **Multi-Provider Support**: Seamlessly switch between Anthropic (Claude), OpenAI, Google Gemini, and Together AI
 - **Tool Use**: Equipped with tools for file manipulation, system commands, Python REPL, and web search
 - **Streaming**: Real-time streaming responses with reasoning display
+- **Multi-Agent Mode**: Optional supervisor + specialist workers (configured in `config.yaml`)
 - **Human-in-the-Loop**: Interrupt pattern for agent-user clarification via `ask_user` tool
 - **Security**: Path validation, command sanitization, and Python code inspection
+- **API Server**: Optional FastAPI server (`--serve`)
+- **Data Analysis Tools**: Dedicated dataset tools (CSV/JSON/JSONL/XLSX, export, plot saving)
 - **Configuration**: Easy configuration via `config.yaml`, environment variables, or CLI flags
 
 ## Architecture
@@ -50,6 +53,13 @@ A powerful, provider-agnostic autonomous coding agent using a ReAct (Reasoning, 
    uv sync
    ```
 
+   Optional extras:
+   ```bash
+   uv sync --extra api    # API server (FastAPI/Uvicorn)
+   uv sync --extra data   # XLSX + plot saving (openpyxl/matplotlib)
+   uv sync --extra all    # everything
+   ```
+
 3. **Set up environment variables:**
    ```bash
    cp .env.example .env
@@ -75,6 +85,15 @@ uv run python -m coding_agent.main --provider anthropic --model claude-3-5-sonne
 
 # with debug logging
 uv run python -m coding_agent.main --log-level DEBUG
+
+# start API server
+uv run python -m coding_agent.main --serve
+
+# multi-agent mode (uses multi_agent config in config.yaml)
+uv run python -m coding_agent.main --multi-agent
+
+# multi-agent with selected workers
+uv run python -m coding_agent.main --multi-agent --workers data_analyst
 ```
 
 ### CLI Options
@@ -86,6 +105,11 @@ uv run python -m coding_agent.main --log-level DEBUG
 | `--provider` | LLM provider (anthropic, openai, together, google) |
 | `--model` | Model name override |
 | `--log-level` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `--serve` | Start the API server instead of the REPL |
+| `--host` | API server host (default: 127.0.0.1) |
+| `--port` | API server port (default: 8000) |
+| `--multi-agent` | Run supervisor + workers from `config.yaml` |
+| `--workers` | Filter to specific workers (names from `config.yaml`) |
 | `--visualize` | Generate Mermaid diagram of agent structure |
 
 ### Configuration
@@ -98,6 +122,16 @@ llm:
   model: "claude-3-5-sonnet-20240620"
   temperature: 0.7
   max_tokens: 4096
+
+multi_agent:
+  supervisor:
+    provider: "openai"
+    model: "gpt-5"
+  workers:
+    data_analyst:
+      provider: "together"
+      model: "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
+      tools: ["read", "list", "ask_user", "load_dataset", "dataset_info", "dataset_describe", "export_dataset"]
 ```
 
 Or via environment variables:
@@ -108,6 +142,8 @@ Or via environment variables:
 
 ## Available Tools
 
+### Core Tools
+
 | Tool | Description |
 |------|-------------|
 | `calculator` | Basic arithmetic operations |
@@ -116,8 +152,33 @@ Or via environment variables:
 | `write_file` | Write content to files |
 | `run_command` | Execute shell commands (with security restrictions) |
 | `python_repl` | Execute Python code in a sandboxed REPL |
-| `tavily_search` | Web search via Tavily API |
+| `search_web` | Web search via Tavily API |
 | `ask_user` | Request clarification from the user |
+
+### Data Analysis Tools
+
+Install `coding-agent[data]` (`uv sync --extra data`) for XLSX/plot support.
+
+| Tool | Description |
+|------|-------------|
+| `load_dataset` | Load CSV/JSON/JSONL/XLSX into an in-memory dataset registry |
+| `list_datasets` | List loaded datasets |
+| `remove_dataset` | Remove a dataset from memory |
+| `clear_datasets` | Clear all datasets from memory |
+| `dataset_info` | Column types + missing counts |
+| `dataset_head` | First N rows (markdown table) |
+| `dataset_tail` | Last N rows (markdown table) |
+| `dataset_sample` | Random sample of rows |
+| `dataset_describe` | Descriptive stats for numeric columns |
+| `dataset_value_counts` | Value counts for a column |
+| `dataset_select_columns` | Project columns into a new dataset |
+| `dataset_filter` | Row filtering with simple conditions |
+| `dataset_sort` | Sort by one or more columns |
+| `dataset_groupby_agg` | Group-by + aggregate (count/sum/mean/min/max) |
+| `export_dataset` | Export dataset to CSV/JSONL/XLSX (requires confirmation) |
+| `save_histogram_plot` | Save histogram plot (requires confirmation) |
+| `save_scatter_plot` | Save scatter plot (requires confirmation) |
+| `save_bar_plot` | Save bar plot of top value counts (requires confirmation) |
 
 ## Security Model
 
@@ -168,11 +229,18 @@ src/coding_agent/
 │   ├── base.py        # BaseTool abstract class
 │   ├── ask_user.py    # human-in-the-loop tool
 │   ├── calculator.py  # basic math operations
+│   ├── data_analysis.py # dataset tools (csv/json/jsonl/xlsx, export, plots)
 │   ├── filesystem.py  # file operations
 │   ├── python_repl.py # Python code execution
 │   ├── search.py      # web search
 │   ├── security.py    # path/command/code validation
 │   └── system.py      # shell command execution
+├── multi_agent/       # supervisor/worker orchestration (optional)
+│   ├── supervisor.py  # supervisor agent
+│   ├── worker.py      # worker wrapper
+│   ├── tools.py       # delegate/synthesize tools
+│   └── workers/       # worker factories (coder/researcher/reviewer/context/data_analyst)
+└── api/               # optional FastAPI server (install with --extra api)
 └── utils/
     └── stream_parser.py # streaming response parsing
 ```
@@ -213,7 +281,7 @@ uv run ruff format src/
 
 1. Create a new tool in `tools/` inheriting from `BaseTool`
 2. Implement the required properties and `execute()` method
-3. Add it to the tools list in `main.py`
+3. Add it to the tools list in `main.py` (single-agent CLI) and/or to `_create_tools_from_names()` for multi-agent config support
 
 ```python
 class MyTool(BaseTool):
