@@ -187,7 +187,7 @@ def main():
 
     # handle multi-agent mode
     if args.multi_agent:
-        run_multi_agent(client, args.workers, args.stream, args.verbose)
+        run_multi_agent(yaml_config, args.stream, args.verbose)
         return
 
     agent = CodingAgent(client, tools, system_prompt=system_prompt)
@@ -270,46 +270,153 @@ def run_repl(agent: CodingAgent, stream: bool = False, verbose: bool = False) ->
             print(f"Unexpected error: {type(e).__name__}: {e}")
 
 
+def _create_tools_from_names(tool_names: list[str]) -> list:
+    """Create tool instances from a list of tool names.
+
+    Args:
+        tool_names: List of tool name strings from config.
+
+    Returns:
+        List of tool instances.
+    """
+    from .tools.calculator import CalculatorTool
+    from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
+    from .tools.python_repl import PythonREPLTool
+    from .tools.search import TavilySearchTool
+    from .tools.system import RunCommandTool
+
+    # mapping of config names to tool classes
+    tool_registry = {
+        "read": ReadFileTool,
+        "write": WriteFileTool,
+        "list": ListDirectoryTool,
+        "run_command": RunCommandTool,
+        "python_repl": PythonREPLTool,
+        "search_web": TavilySearchTool,
+        "calculator": CalculatorTool,
+    }
+
+    tools = []
+    for name in tool_names:
+        if name in tool_registry:
+            tools.append(tool_registry[name]())
+        else:
+            print(f"  Warning: Unknown tool '{name}', skipping.")
+
+    return tools
+
+
 def run_multi_agent(
-    client,
-    worker_names: list[str],
+    yaml_config: dict,
     stream: bool = False,
     verbose: bool = False,
 ) -> None:
-    """Run the multi-agent system with supervisor and workers.
+    """Run the multi-agent system with supervisor and workers from YAML config.
 
     Args:
-        client: The LLM client to use for all agents.
-        worker_names: List of worker types to create.
+        yaml_config: Configuration loaded from config.yaml.
         stream: Whether to stream responses.
         verbose: Whether to print verbose output.
     """
-    from .multi_agent import (
-        SupervisorAgent,
-        create_coder_worker,
-        create_researcher_worker,
-        create_reviewer_worker,
-    )
+    from .multi_agent import SupervisorAgent, WorkerAgent
+    from .multi_agent.prompts import CODER_PROMPT, RESEARCHER_PROMPT, REVIEWER_PROMPT
 
-    # create workers based on selection
-    worker_factories = {
-        "coder": create_coder_worker,
-        "researcher": create_researcher_worker,
-        "reviewer": create_reviewer_worker,
+    multi_agent_config = yaml_config.get("multi_agent", {})
+
+    if not multi_agent_config:
+        print("Error: No multi_agent configuration found in config.yaml")
+        print("Please add a multi_agent section with supervisor and workers config.")
+        return
+
+    # get default llm config as fallback
+    default_llm = yaml_config.get("llm", {})
+
+    # create supervisor client
+    supervisor_config = multi_agent_config.get("supervisor", {})
+    supervisor_provider = supervisor_config.get("provider") or default_llm.get("provider")
+    supervisor_model = supervisor_config.get("model") or default_llm.get("model")
+
+    if not supervisor_provider:
+        print("Error: No provider specified for supervisor.")
+        return
+
+    print(f"Creating supervisor: {supervisor_provider}/{supervisor_model}")
+    try:
+        # extract client config (reasoning_effort, temperature, etc.)
+        supervisor_client_config = {
+            k: v for k, v in supervisor_config.items()
+            if k not in ["provider", "model", "tools"]
+        }
+        supervisor_client = create_client(supervisor_provider, supervisor_model, supervisor_client_config)
+    except ValueError as e:
+        print(f"Error creating supervisor client: {e}")
+        return
+
+    # create workers from config
+    workers_config = multi_agent_config.get("workers", {})
+
+    if not workers_config:
+        print("Error: No workers configured in multi_agent.workers")
+        return
+
+    # worker prompts mapping
+    worker_prompts = {
+        "coder": CODER_PROMPT,
+        "researcher": RESEARCHER_PROMPT,
+        "reviewer": REVIEWER_PROMPT,
+    }
+
+    # worker descriptions
+    worker_descriptions = {
+        "coder": "Senior software engineer for writing, reading, and modifying code.",
+        "researcher": "Research specialist for finding and synthesizing information.",
+        "reviewer": "Code reviewer for quality, security, and best practices analysis.",
     }
 
     workers = {}
-    for name in worker_names:
-        if name in worker_factories:
-            workers[name] = worker_factories[name](client)
-            print(f"  Created worker: {name}")
+    for worker_name, worker_cfg in workers_config.items():
+        worker_provider = worker_cfg.get("provider") or default_llm.get("provider")
+        worker_model = worker_cfg.get("model") or default_llm.get("model")
+
+        if not worker_provider:
+            print(f"  Warning: No provider for worker '{worker_name}', skipping.")
+            continue
+
+        print(f"  Creating worker '{worker_name}': {worker_provider}/{worker_model}")
+
+        try:
+            # extract client config
+            worker_client_config = {
+                k: v for k, v in worker_cfg.items()
+                if k not in ["provider", "model", "tools"]
+            }
+            worker_client = create_client(worker_provider, worker_model, worker_client_config)
+
+            # get tools for this worker
+            tool_names = worker_cfg.get("tools", [])
+            tools = _create_tools_from_names(tool_names)
+
+            # get prompt (use default if worker type is known)
+            prompt = worker_prompts.get(worker_name, f"You are a {worker_name} assistant.")
+            description = worker_descriptions.get(worker_name, f"Worker agent: {worker_name}")
+
+            workers[worker_name] = WorkerAgent(
+                name=worker_name,
+                client=worker_client,
+                tools=tools,
+                system_prompt=prompt,
+                description=description,
+            )
+        except ValueError as e:
+            print(f"  Error creating worker '{worker_name}': {e}")
+            continue
 
     if not workers:
-        print("Error: No valid workers specified.")
+        print("Error: No workers could be created.")
         return
 
     # create supervisor
-    supervisor = SupervisorAgent(client, workers, verbose=verbose)
+    supervisor = SupervisorAgent(supervisor_client, workers, verbose=verbose)
     print(f"\nMulti-Agent System Initialized with {len(workers)} workers.")
     print("Type 'exit' to quit.")
     print("-" * 50)
