@@ -52,6 +52,7 @@ def _start_server(host: str, port: int) -> None:
     """Start the API server."""
     try:
         import uvicorn
+
         from .api import app
     except ImportError:
         print("Error: API dependencies not installed.")
@@ -279,7 +280,25 @@ def _create_tools_from_names(tool_names: list[str]) -> list:
     Returns:
         List of tool instances.
     """
+    from .tools.ask_user import AskUserTool
     from .tools.calculator import CalculatorTool
+    from .tools.data_analysis import (
+        ClearDatasetsTool,
+        DatasetDescribeTool,
+        DatasetFilterTool,
+        DatasetHeadTool,
+        DatasetInfoTool,
+        DatasetSampleTool,
+        DatasetSelectColumnsTool,
+        DatasetTailTool,
+        DatasetValueCountsTool,
+        ExportDatasetTool,
+        ListDatasetsTool,
+        LoadDatasetTool,
+        RemoveDatasetTool,
+        SaveHistogramPlotTool,
+        SaveScatterPlotTool,
+    )
     from .tools.filesystem import ListDirectoryTool, ReadFileTool, WriteFileTool
     from .tools.python_repl import PythonREPLTool
     from .tools.search import TavilySearchTool
@@ -294,6 +313,23 @@ def _create_tools_from_names(tool_names: list[str]) -> list:
         "python_repl": PythonREPLTool,
         "search_web": TavilySearchTool,
         "calculator": CalculatorTool,
+        "ask_user": AskUserTool,
+        # data analysis tools
+        "load_dataset": LoadDatasetTool,
+        "list_datasets": ListDatasetsTool,
+        "remove_dataset": RemoveDatasetTool,
+        "clear_datasets": ClearDatasetsTool,
+        "dataset_head": DatasetHeadTool,
+        "dataset_tail": DatasetTailTool,
+        "dataset_sample": DatasetSampleTool,
+        "dataset_info": DatasetInfoTool,
+        "dataset_describe": DatasetDescribeTool,
+        "dataset_value_counts": DatasetValueCountsTool,
+        "dataset_select_columns": DatasetSelectColumnsTool,
+        "dataset_filter": DatasetFilterTool,
+        "export_dataset": ExportDatasetTool,
+        "save_histogram_plot": SaveHistogramPlotTool,
+        "save_scatter_plot": SaveScatterPlotTool,
     }
 
     tools = []
@@ -319,7 +355,13 @@ def run_multi_agent(
         verbose: Whether to print verbose output.
     """
     from .multi_agent import SupervisorAgent, WorkerAgent
-    from .multi_agent.prompts import CODER_PROMPT, CONTEXT_PROMPT, RESEARCHER_PROMPT, REVIEWER_PROMPT
+    from .multi_agent.prompts import (
+        CODER_PROMPT,
+        CONTEXT_PROMPT,
+        DATA_ANALYST_PROMPT,
+        RESEARCHER_PROMPT,
+        REVIEWER_PROMPT,
+    )
 
     multi_agent_config = yaml_config.get("multi_agent", {})
 
@@ -365,6 +407,7 @@ def run_multi_agent(
         "researcher": RESEARCHER_PROMPT,
         "reviewer": REVIEWER_PROMPT,
         "context": CONTEXT_PROMPT,
+        "data_analyst": DATA_ANALYST_PROMPT,
     }
 
     # worker descriptions
@@ -373,6 +416,7 @@ def run_multi_agent(
         "researcher": "Research specialist for finding and synthesizing information.",
         "reviewer": "Code reviewer for quality, security, and best practices analysis.",
         "context": "Codebase analyst for exploring project structure, dependencies, and architecture.",
+        "data_analyst": "Data analysis specialist for loading, exploring, transforming, and exporting datasets.",
     }
 
     workers = {}
@@ -440,9 +484,8 @@ def run_multi_agent(
         try:
             result = supervisor.run(user_input, stream=stream)
 
-            if result.content:
-                print(f"\nSupervisor: {result.content}")
-            elif result.error:
+            # note: the underlying agent already prints "Agent: ..." via _print_response()
+            if result.error:
                 print(f"\nError: {result.error}")
 
         except AuthenticationError as e:
