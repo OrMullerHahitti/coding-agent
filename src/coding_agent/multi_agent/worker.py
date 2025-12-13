@@ -25,6 +25,7 @@ class WorkerAgent:
         tools: list[BaseTool],
         system_prompt: str,
         description: str = "",
+        interactive: bool = False,
     ):
         """Initialize a worker agent.
 
@@ -40,6 +41,7 @@ class WorkerAgent:
         self._client = client
         self._tools = tools
         self._system_prompt = system_prompt
+        self._interactive = interactive
 
         # create the underlying agent
         self._agent = CodingAgent(
@@ -60,22 +62,54 @@ class WorkerAgent:
         """
         result = self._agent.run(task, stream=False, verbose=verbose)
 
-        # handle different result states
-        if result.state == AgentState.COMPLETED:
-            return result.content or "Task completed with no output."
+        while True:
+            if result.state == AgentState.COMPLETED:
+                return result.content or "Task completed with no output."
 
-        if result.state == AgentState.ERROR:
-            return f"Error: {result.error}"
+            if result.state == AgentState.ERROR:
+                return f"Error: {result.error}"
 
-        if result.state == AgentState.INTERRUPTED:
-            # workers shouldn't use interrupt tools, but handle gracefully
-            return f"Worker interrupted: {result.interrupt.question if result.interrupt else 'Unknown'}"
+            if result.state == AgentState.INTERRUPTED:
+                if not self._interactive:
+                    return f"Worker interrupted: {result.interrupt.question if result.interrupt else 'Unknown'}"
+                if not result.interrupt:
+                    return "Worker interrupted: Unknown"
+                try:
+                    user_response = input(
+                        f"\n[{self.name} asks]: {result.interrupt.question}\nYour answer: "
+                    )
+                except (KeyboardInterrupt, EOFError):
+                    return "Worker interrupted: user cancelled input."
+                result = self._agent.resume(
+                    result.interrupt.tool_call_id,
+                    user_response,
+                    stream=False,
+                    verbose=verbose,
+                )
+                continue
 
-        if result.state == AgentState.AWAITING_CONFIRMATION:
-            # workers shouldn't need confirmation in autonomous mode
-            return f"Worker needs confirmation: {result.confirmation.message if result.confirmation else 'Unknown'}"
+            if result.state == AgentState.AWAITING_CONFIRMATION:
+                if not self._interactive:
+                    return (
+                        f"Worker needs confirmation: {result.confirmation.message if result.confirmation else 'Unknown'}"
+                    )
+                if not result.confirmation:
+                    return "Worker needs confirmation: Unknown"
+                try:
+                    confirm = input(
+                        f"\n[{self.name} confirm]: {result.confirmation.message} (y/n): "
+                    ).strip().lower()
+                except (KeyboardInterrupt, EOFError):
+                    confirm = "n"
+                result = self._agent.resume_confirmation(
+                    result.confirmation.tool_call_id,
+                    confirmed=(confirm == "y"),
+                    stream=False,
+                    verbose=verbose,
+                )
+                continue
 
-        return f"Unexpected state: {result.state}"
+            return f"Unexpected state: {result.state}"
 
     def execute_with_history(
         self,

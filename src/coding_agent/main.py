@@ -286,16 +286,19 @@ def _create_tools_from_names(tool_names: list[str]) -> list:
         ClearDatasetsTool,
         DatasetDescribeTool,
         DatasetFilterTool,
+        DatasetGroupByAggTool,
         DatasetHeadTool,
         DatasetInfoTool,
         DatasetSampleTool,
         DatasetSelectColumnsTool,
+        DatasetSortTool,
         DatasetTailTool,
         DatasetValueCountsTool,
         ExportDatasetTool,
         ListDatasetsTool,
         LoadDatasetTool,
         RemoveDatasetTool,
+        SaveBarPlotTool,
         SaveHistogramPlotTool,
         SaveScatterPlotTool,
     )
@@ -327,7 +330,10 @@ def _create_tools_from_names(tool_names: list[str]) -> list:
         "dataset_value_counts": DatasetValueCountsTool,
         "dataset_select_columns": DatasetSelectColumnsTool,
         "dataset_filter": DatasetFilterTool,
+        "dataset_sort": DatasetSortTool,
+        "dataset_groupby_agg": DatasetGroupByAggTool,
         "export_dataset": ExportDatasetTool,
+        "save_bar_plot": SaveBarPlotTool,
         "save_histogram_plot": SaveHistogramPlotTool,
         "save_scatter_plot": SaveScatterPlotTool,
     }
@@ -452,6 +458,7 @@ def run_multi_agent(
                 tools=tools,
                 system_prompt=prompt,
                 description=description,
+                interactive=True,
             )
         except ValueError as e:
             print(f"  Error creating worker '{worker_name}': {e}")

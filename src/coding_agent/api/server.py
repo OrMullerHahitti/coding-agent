@@ -40,15 +40,18 @@ app = create_app()
 
 @app.post("/api/sessions", response_model=dict)
 def create_session(
-    provider: str = "openai",
+    provider: str | None = None,
     model: str | None = None,
-    system_prompt: str = "You are a helpful coding assistant.",
+    additional_instructions: str | None = None,
 ) -> dict:
-    """Create a new agent session."""
+    """Create a new agent session.
+
+    Provider and model default to values in config.yaml if not specified.
+    """
     session = sessions.create_session(
         provider=provider,
         model=model,
-        system_prompt=system_prompt,
+        additional_instructions=additional_instructions,
     )
     return {"session_id": session.id}
 
