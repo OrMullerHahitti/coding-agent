@@ -1,0 +1,12 @@
+# production overrides for docker compose
+# usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  backend:
+    restart: always
+    volumes: []  # no source mounting in production
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    restart: always

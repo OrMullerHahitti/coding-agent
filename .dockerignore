@@ -1,0 +1,46 @@
+# git
+.git
+.gitignore
+
+# python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+.eggs
+*.egg-info
+*.egg
+
+# ide
+.idea
+.vscode
+*.swp
+*.swo
+
+# testing
+.pytest_cache
+.coverage
+htmlcov
+.tox
+
+# documentation
+docs/_build
+*.md
+
+# environment
+.env
+.env.*
+!.env.example
+
+# frontend (built separately)
+web/
+additions/
+
+# misc
+*.log
+.DS_Store
+Thumbs.db

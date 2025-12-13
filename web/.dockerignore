@@ -1,0 +1,17 @@
+# dependencies
+node_modules
+
+# build output (will be regenerated)
+dist
+
+# development
+.vscode
+*.log
+
+# environment
+.env
+.env.*
+
+# misc
+.DS_Store
+Thumbs.db
