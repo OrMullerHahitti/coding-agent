@@ -46,6 +46,7 @@ from .tools import DelegateTaskTool, SynthesizeResultsTool
 from .worker import WorkerAgent
 from .workers import (
     create_coder_worker,
+    create_context_worker,
     create_researcher_worker,
     create_reviewer_worker,
 )
@@ -60,6 +61,7 @@ __all__ = [
     # factory functions
     "create_supervisor",
     "create_coder_worker",
+    "create_context_worker",
     "create_researcher_worker",
     "create_reviewer_worker",
 ]
