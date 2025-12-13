@@ -3,30 +3,24 @@
 Handles provider selection, tool configuration, and the main interaction loop.
 """
 
-import os
+import argparse
 import sys
 
-from dotenv import load_dotenv
+import yaml
 
-# load environment variables
-load_dotenv()
-
-import argparse  # noqa: E402
-
-import yaml  # noqa: E402
-
-from .agent import CodingAgent  # noqa: E402
-from .clients.factory import create_client, get_available_providers  # noqa: E402
-from .exceptions import (  # noqa: E402
+from .agent import CodingAgent
+from .clients.factory import create_client, get_available_providers
+from .config import get_settings
+from .exceptions import (
     AgentError,
     AuthenticationError,
     ProviderUnavailableError,
     RateLimitError,
 )
-from .logging import setup_logging  # noqa: E402
+from .logging import setup_logging
 
 
-def load_config() -> dict:
+def load_yaml_config() -> dict:
     """Load configuration from config.yaml if it exists."""
     try:
         with open("config.yaml", "r") as f:
@@ -35,30 +29,21 @@ def load_config() -> dict:
         return {}
 
 
-def get_provider_and_model(args: argparse.Namespace, config: dict) -> tuple[str | None, str | None]:
+def get_provider_and_model(args: argparse.Namespace, yaml_config: dict) -> tuple[str | None, str | None]:
     """Determine the provider and model to use.
 
     Priority order:
     1. CLI arguments
-    2. Config file
-    3. Environment variable
+    2. Config file (config.yaml)
+    3. Environment variables (via pydantic settings)
     4. Auto-detection based on available API keys
     """
-    llm_config = config.get("llm", {})
+    settings = get_settings()
+    llm_config = yaml_config.get("llm", {})
 
-    provider = args.provider or llm_config.get("provider") or os.getenv("LLM_PROVIDER")
-    model = args.model or llm_config.get("model")
-
-    # auto-detect provider based on available API keys
-    if not provider:
-        if os.getenv("ANTHROPIC_API_KEY"):
-            provider = "anthropic"
-        elif os.getenv("OPENAI_API_KEY"):
-            provider = "openai"
-        elif os.getenv("TOGETHER_API_KEY"):
-            provider = "together"
-        elif os.getenv("GOOGLE_API_KEY"):
-            provider = "google"
+    # priority: cli > yaml > env
+    provider = args.provider or llm_config.get("provider") or settings.detect_provider()
+    model = args.model or llm_config.get("model") or settings.llm_model
 
     return provider, model
 
@@ -136,8 +121,8 @@ def main():
         _start_server(args.host, args.port)
         return
 
-    config = load_config()
-    provider, model = get_provider_and_model(args, config)
+    yaml_config = load_yaml_config()
+    provider, model = get_provider_and_model(args, yaml_config)
 
     if not provider:
         print("Error: No LLM provider specified and no API keys found.")
@@ -153,7 +138,7 @@ def main():
 
     try:
         # extract client config parameters (excluding provider/model which are handled separately)
-        llm_config = config.get("llm", {})
+        llm_config = yaml_config.get("llm", {})
         client_config = {
             k: v for k, v in llm_config.items()
             if k not in ["provider", "model"]
@@ -228,7 +213,7 @@ def run_repl(agent: CodingAgent, stream: bool = False, verbose: bool = False) ->
             # handle interrupts (ask_user tool)
             while result.is_interrupted:
                 try:
-                    user_response = input(f"\n[Agent asks]: {result.interrupt.question}\nYour answer: ")
+                    user_response = input(f"\n[Agent asks]: {result.interrupt.question}\nYour answer: ") # type: ignore
                 except (KeyboardInterrupt, EOFError):
                     print("\nInterrupt cancelled.")
                     break

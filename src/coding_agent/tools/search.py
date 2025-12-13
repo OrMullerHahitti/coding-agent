@@ -1,16 +1,17 @@
-import os
 from typing import Any
 
 from tavily import TavilyClient
 
+from ..config import get_settings
 from .base import BaseTool
 
 
 class TavilySearchTool(BaseTool):
     def __init__(self):
-        api_key = os.getenv("TAVILY_API_KEY")
+        settings = get_settings()
+        api_key = settings.tavily_api_key
         if not api_key:
-            # We don't raise error here to allow agent to start,
+            # we don't raise error here to allow agent to start,
             # but execution will fail if key is missing.
             self.client = None
         else:

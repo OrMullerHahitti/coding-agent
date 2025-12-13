@@ -4,9 +4,9 @@ This module provides a centralized way to create LLM clients based on provider
 name, using a registry pattern that makes it easy to add new providers.
 """
 
-import os
 from typing import Any
 
+from ..config import get_settings
 from .base import BaseLLMClient
 
 # registry of provider configurations
@@ -85,8 +85,9 @@ def create_client(
 
     config = _PROVIDER_REGISTRY[provider]
 
-    # resolve API key
-    resolved_key = api_key or os.getenv(config["api_key_env"])
+    # resolve API key from settings
+    settings = get_settings()
+    resolved_key = api_key or settings.get_api_key_for_provider(provider)
     if not resolved_key:
         raise ValueError(f"{config['api_key_env']} not set in environment")
 

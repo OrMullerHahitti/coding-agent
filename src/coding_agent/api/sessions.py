@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from ..agent import CodingAgent
 from ..clients.factory import create_client
+from ..config import get_settings
+from ..prompts import SYSTEM_PROMPT
 from ..tools import get_default_tools
 
 
@@ -26,34 +28,51 @@ class Session:
 class SessionManager:
     """Manages agent sessions."""
 
-    def __init__(self, session_timeout: int = 3600):
+    def __init__(self, session_timeout: int | None = None):
         """Initialize session manager.
 
         Args:
-            session_timeout: Session timeout in seconds (default 1 hour)
+            session_timeout: Session timeout in seconds (uses settings if not specified)
         """
+        settings = get_settings()
         self._sessions: dict[str, Session] = {}
-        self._timeout = session_timeout
+        self._timeout = session_timeout or settings.session_timeout
 
     def create_session(
         self,
-        provider: str = "openai",
+        provider: str | None = None,
         model: str | None = None,
-        system_prompt: str = "You are a helpful coding assistant.",
+        additional_instructions: str | None = None,
     ) -> Session:
         """Create a new session with a fresh agent.
 
         Args:
-            provider: LLM provider to use
-            model: Model name (uses provider default if not specified)
-            system_prompt: System prompt for the agent
+            provider: LLM provider (auto-detected from settings if not specified)
+            model: Model name (uses settings if not specified)
+            additional_instructions: Extra instructions to append to system prompt
 
         Returns:
             New session with agent
         """
+        # use settings defaults if not provided
+        settings = get_settings()
+        provider = provider or settings.detect_provider()
+        model = model or settings.llm_model
+
+        if not provider:
+            raise ValueError(
+                "No provider specified and none found in environment"
+            )
+
         session_id = str(uuid.uuid4())
         client = create_client(provider, model=model)
         tools = get_default_tools()
+
+        # build system prompt from base + optional additions
+        system_prompt = SYSTEM_PROMPT
+        if additional_instructions:
+            system_prompt = f"{SYSTEM_PROMPT}\n\n{additional_instructions}"
+
         agent = CodingAgent(client=client, tools=tools, system_prompt=system_prompt)
 
         session = Session(id=session_id, agent=agent)
