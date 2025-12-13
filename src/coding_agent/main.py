@@ -319,7 +319,7 @@ def run_multi_agent(
         verbose: Whether to print verbose output.
     """
     from .multi_agent import SupervisorAgent, WorkerAgent
-    from .multi_agent.prompts import CODER_PROMPT, RESEARCHER_PROMPT, REVIEWER_PROMPT
+    from .multi_agent.prompts import CODER_PROMPT, CONTEXT_PROMPT, RESEARCHER_PROMPT, REVIEWER_PROMPT
 
     multi_agent_config = yaml_config.get("multi_agent", {})
 
@@ -364,6 +364,7 @@ def run_multi_agent(
         "coder": CODER_PROMPT,
         "researcher": RESEARCHER_PROMPT,
         "reviewer": REVIEWER_PROMPT,
+        "context": CONTEXT_PROMPT,
     }
 
     # worker descriptions
@@ -371,6 +372,7 @@ def run_multi_agent(
         "coder": "Senior software engineer for writing, reading, and modifying code.",
         "researcher": "Research specialist for finding and synthesizing information.",
         "reviewer": "Code reviewer for quality, security, and best practices analysis.",
+        "context": "Codebase analyst for exploring project structure, dependencies, and architecture.",
     }
 
     workers = {}
