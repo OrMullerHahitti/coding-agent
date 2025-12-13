@@ -4,10 +4,10 @@ The CodingAgent orchestrates conversations between the user, LLM, and tools.
 It uses unified types for all interactions, making it provider-agnostic.
 """
 
-import fnmatch
 from typing import Iterator
 
 from .clients.base import BaseLLMClient
+from .core import MemoryManager, PromptBuilder, ToolExecutor
 from .exceptions import ConfirmationRequested, InterruptRequested
 from .stream_handler import StreamHandler
 from .tools.base import BaseTool
@@ -16,7 +16,6 @@ from .types import (
     AgentState,
     ConfirmationInfo,
     InterruptInfo,
-    MessageRole,
     ToolCall,
     UnifiedMessage,
     UnifiedResponse,
@@ -53,21 +52,32 @@ class CodingAgent:
                 Example: {"write": ["tests/*", "*.log"], "execute": ["ls", "pwd"]}
         """
         self.client = client
-        self.tools = {tool.name: tool for tool in tools}
         self.tool_list = tools
-        self.auto_approve_patterns = auto_approve_patterns or {}
 
-        formatted_prompt = self.client.format_system_prompt(system_prompt, tools)
-        self.history: list[UnifiedMessage] = [
-            UnifiedMessage(role=MessageRole.SYSTEM, content=formatted_prompt)
-        ]
+        # initialize components
+        self.prompt_builder = PromptBuilder(system_prompt)
+        self.tool_executor = ToolExecutor(
+            tools={tool.name: tool for tool in tools},
+            auto_approve_patterns=auto_approve_patterns,
+        )
+        self.memory = MemoryManager()
 
-        # state for interrupt handling
-        self._pending_interrupt: InterruptInfo | None = None
-        self._pending_tool_calls: list[ToolCall] | None = None
+        # initialize conversation with system prompt
+        formatted_prompt = self.prompt_builder.format_system_prompt(tools, client)
+        self.memory.add_message(
+            self.prompt_builder.build_system_message(formatted_prompt)
+        )
 
-        # state for confirmation handling
-        self._pending_confirmation: ConfirmationInfo | None = None
+    # legacy property for backwards compatibility
+    @property
+    def tools(self) -> dict[str, BaseTool]:
+        """Get tools dictionary (for backwards compatibility)."""
+        return self.tool_executor.tools
+
+    @property
+    def history(self) -> list[UnifiedMessage]:
+        """Get conversation history (for backwards compatibility)."""
+        return self.memory.history
 
     def run(
         self,
@@ -85,8 +95,11 @@ class CodingAgent:
         Returns:
             AgentRunResult with state, content, or interrupt info
         """
-        self.history.append(
-            UnifiedMessage(role=MessageRole.USER, content=user_input)
+        # clean up any pending state to avoid corrupted history
+        self.memory.cleanup_pending_state()
+
+        self.memory.add_message(
+            self.prompt_builder.build_user_message(user_input)
         )
 
         return self._run_loop(stream=stream, verbose=verbose)
@@ -112,31 +125,32 @@ class CodingAgent:
         Raises:
             ValueError: If no pending interrupt or ID mismatch
         """
-        if not self._pending_interrupt:
+        interrupt = self.memory.pending_interrupt
+        if not interrupt:
             raise ValueError("No pending interrupt to resume")
 
-        if self._pending_interrupt.tool_call_id != tool_call_id:
+        if interrupt.tool_call_id != tool_call_id:
             raise ValueError(
-                f"Tool call ID mismatch: expected {self._pending_interrupt.tool_call_id}, "
+                f"Tool call ID mismatch: expected {interrupt.tool_call_id}, "
                 f"got {tool_call_id}"
             )
 
         # add the user's response as a tool result
-        self.history.append(UnifiedMessage(
-            role=MessageRole.TOOL,
-            content=user_response,
-            tool_call_id=tool_call_id,
-            name=self._pending_interrupt.tool_name,
-        ))
+        self.memory.add_message(
+            self.prompt_builder.build_tool_result(
+                tool_call_id, interrupt.tool_name, user_response
+            )
+        )
 
         # process remaining tool calls if any
-        remaining_calls = self._pending_tool_calls or []
-        self._pending_interrupt = None
-        self._pending_tool_calls = None
+        _, remaining_calls = self.memory.clear_interrupt()
+        remaining_calls = remaining_calls or []
 
         if remaining_calls:
             try:
-                self._execute_tool_calls(remaining_calls, verbose=verbose)
+                self.tool_executor.execute_tool_calls(
+                    remaining_calls, self.memory, verbose=verbose
+                )
             except InterruptRequested as e:
                 return self._create_interrupt_result(e, remaining_calls)
 
@@ -164,44 +178,58 @@ class CodingAgent:
         Raises:
             ValueError: If no pending confirmation or ID mismatch
         """
-        if not self._pending_confirmation:
+        conf = self.memory.pending_confirmation
+        if not conf:
             raise ValueError("No pending confirmation to resume")
 
-        if self._pending_confirmation.tool_call_id != tool_call_id:
+        if conf.tool_call_id != tool_call_id:
             raise ValueError(
-                f"Tool call ID mismatch: expected {self._pending_confirmation.tool_call_id}, "
+                f"Tool call ID mismatch: expected {conf.tool_call_id}, "
                 f"got {tool_call_id}"
             )
 
-        tool_name = self._pending_confirmation.tool_name
-        arguments = self._pending_confirmation.arguments
-        remaining_calls = self._pending_tool_calls or []
-        self._pending_confirmation = None
+        tool_name = conf.tool_name
+        arguments = conf.arguments
+        _, remaining_calls = self.memory.clear_confirmation()
+        remaining_calls = remaining_calls or []
 
         if confirmed:
-            tool = self.tools[tool_name]
-            try:
-                result = self._execute_single_tool(tool, tool_call_id, arguments, verbose)
-                self._add_tool_result(tool_call_id, tool_name, result)
-            except InterruptRequested as e:
-                self._pending_tool_calls = remaining_calls if remaining_calls else None
-                return self._create_interrupt_result(e, [])
-            except Exception as e:
-                error_msg = f"Tool execution failed: {e}"
-                print(f"Error: {error_msg}")
-                self._add_tool_result(tool_call_id, tool_name, error_msg)
+            tool = self.tool_executor.get_tool(tool_name)
+            if tool:
+                try:
+                    result = self.tool_executor.execute_single_tool(
+                        tool, tool_call_id, arguments, verbose
+                    )
+                    self.memory.add_tool_result(tool_call_id, tool_name, result)
+                except InterruptRequested as e:
+                    if remaining_calls:
+                        self.memory.set_pending_interrupt(
+                            InterruptInfo(
+                                tool_name=e.tool_name,
+                                tool_call_id=e.tool_call_id,
+                                question=e.question,
+                                context=e.context,
+                            ),
+                            remaining_calls,
+                        )
+                    return self._create_interrupt_result(e, [])
+                except Exception as e:
+                    error_msg = f"Tool execution failed: {e}"
+                    print(f"Error: {error_msg}")
+                    self.memory.add_tool_result(tool_call_id, tool_name, error_msg)
         else:
-            self._add_tool_result(
+            self.memory.add_tool_result(
                 tool_call_id, tool_name,
-                f"Operation cancelled by user: {tool_name} was not executed."
+                f"Operation cancelled by user: {tool_name} was not executed. "
+                "Do not retry this operation - inform the user that it was cancelled."
             )
-
-        self._pending_tool_calls = None
 
         # process remaining tool calls if any
         if remaining_calls:
             try:
-                self._execute_tool_calls(remaining_calls, verbose=verbose)
+                self.tool_executor.execute_tool_calls(
+                    remaining_calls, self.memory, verbose=verbose
+                )
             except InterruptRequested as e:
                 return self._create_interrupt_result(e, remaining_calls)
             except ConfirmationRequested as e:
@@ -218,8 +246,8 @@ class CodingAgent:
         """Internal agent loop that handles interrupts."""
         while True:
             response = self.client.generate(
-                messages=self.history,
-                tools=self.tool_list if self.tools else None,
+                messages=self.memory.history,
+                tools=self.tool_list if self.tool_executor.tools else None,
                 stream=stream,
             )
 
@@ -234,7 +262,7 @@ class CodingAgent:
                 # print output for non-streaming (streaming prints during process)
                 self._print_response(message, verbose)
 
-            self.history.append(message)
+            self.memory.add_message(message)
 
             # handle tool calls or return completed result
             result = self._process_message(message, verbose)
@@ -242,12 +270,7 @@ class CodingAgent:
                 return result
 
     def _print_response(self, message: UnifiedMessage, verbose: bool) -> None:
-        """Print response content for non-streaming mode.
-
-        Args:
-            message: The message to print.
-            verbose: Whether to print reasoning content.
-        """
+        """Print response content for non-streaming mode."""
         if verbose and message.reasoning_content:
             print(f"\n[Reasoning]: {message.reasoning_content}")
         if message.content:
@@ -258,18 +281,12 @@ class CodingAgent:
         message: UnifiedMessage,
         verbose: bool,
     ) -> AgentRunResult | None:
-        """Process a message, executing tool calls or returning completion.
-
-        Args:
-            message: The message to process.
-            verbose: Whether to print verbose output.
-
-        Returns:
-            AgentRunResult if complete or interrupted, None if loop should continue.
-        """
+        """Process a message, executing tool calls or returning completion."""
         if message.tool_calls:
             try:
-                self._execute_tool_calls(message.tool_calls, verbose=verbose)
+                self.tool_executor.execute_tool_calls(
+                    message.tool_calls, self.memory, verbose=verbose
+                )
             except InterruptRequested as e:
                 return self._create_interrupt_result(e, message.tool_calls)
             except ConfirmationRequested as e:
@@ -297,17 +314,17 @@ class CodingAgent:
             if found_interrupted:
                 remaining.append(tc)
 
-        self._pending_interrupt = InterruptInfo(
+        info = InterruptInfo(
             tool_name=interrupt.tool_name,
             tool_call_id=interrupt.tool_call_id,
             question=interrupt.question,
             context=interrupt.context,
         )
-        self._pending_tool_calls = remaining if remaining else None
+        self.memory.set_pending_interrupt(info, remaining if remaining else None)
 
         return AgentRunResult(
             state=AgentState.INTERRUPTED,
-            interrupt=self._pending_interrupt,
+            interrupt=info,
         )
 
     def _create_confirmation_result(
@@ -317,127 +334,30 @@ class CodingAgent:
     ) -> AgentRunResult:
         """Create a confirmation result and store state for resumption."""
         remaining = [tc for tc in tool_calls if tc.id != conf.tool_call_id]
-        self._pending_confirmation = ConfirmationInfo(
+        info = ConfirmationInfo(
             tool_name=conf.tool_name,
             tool_call_id=conf.tool_call_id,
             message=conf.message,
             operation=conf.operation,
             arguments=conf.arguments,
         )
-        self._pending_tool_calls = remaining if remaining else None
+        self.memory.set_pending_confirmation(info, remaining if remaining else None)
+
         return AgentRunResult(
             state=AgentState.AWAITING_CONFIRMATION,
-            confirmation=self._pending_confirmation,
+            confirmation=info,
         )
-
-    def _is_auto_approved(self, operation: str, value: str) -> bool:
-        """Check if an operation is auto-approved by configured patterns."""
-        patterns = self.auto_approve_patterns.get(operation, [])
-        return any(fnmatch.fnmatch(value, p) for p in patterns)
-
-    def _add_tool_result(self, tool_call_id: str, name: str, content: str) -> None:
-        """Add a tool result to conversation history."""
-        self.history.append(UnifiedMessage(
-            role=MessageRole.TOOL,
-            content=content,
-            tool_call_id=tool_call_id,
-            name=name,
-        ))
-
-    def _execute_single_tool(
-        self, tool: BaseTool, tool_call_id: str, arguments: dict, verbose: bool
-    ) -> str:
-        """Execute a single tool and return result."""
-        if getattr(tool, "INTERRUPT_TOOL", False):
-            result = tool.execute(**arguments, _tool_call_id=tool_call_id)
-        else:
-            result = tool.execute(**arguments)
-        if verbose:
-            print(f"  Result: {result}")
-        return str(result)
-
-    def _execute_tool_calls(self, tool_calls: list[ToolCall], verbose: bool = False) -> None:
-        """Execute tool calls and add results to history.
-
-        Args:
-            tool_calls: List of tool calls to execute
-            verbose: Whether to print verbose output
-
-        Raises:
-            InterruptRequested: If a tool requests user input
-        """
-        for tool_call in tool_calls:
-            tool_name = tool_call.name
-
-            if tool_name not in self.tools:
-                error_msg = f"Tool '{tool_name}' not found"
-                print(f"Error: {error_msg}")
-                self.history.append(UnifiedMessage(
-                    role=MessageRole.TOOL,
-                    content=error_msg,
-                    tool_call_id=tool_call.id,
-                    name=tool_name,
-                ))
-                continue
-
-            tool = self.tools[tool_name]
-
-            # check if confirmation is required
-            if getattr(tool, "REQUIRES_CONFIRMATION", False):
-                op_type = getattr(tool, "OPERATION_TYPE", "")
-                check_arg = getattr(tool, "CONFIRMATION_CHECK_ARG", "path")
-                check_value = tool_call.arguments.get(check_arg, "")
-                if not self._is_auto_approved(op_type, check_value):
-                    raise ConfirmationRequested(
-                        tool_name=tool_name,
-                        tool_call_id=tool_call.id,
-                        message=tool.get_confirmation_message(**tool_call.arguments),
-                        operation=op_type,
-                        arguments=tool_call.arguments,
-                    )
-
-            if verbose:
-                print(f"[Verbose] Executing tool '{tool_name}' (ID: {tool_call.id})")
-                print(f"  Args: {tool_call.arguments}")
-            else:
-                print(f"Executing tool: {tool_name} with args: {tool_call.arguments}")
-
-            try:
-                result = self._execute_single_tool(
-                    tool, tool_call.id, tool_call.arguments, verbose
-                )
-                self._add_tool_result(tool_call.id, tool_name, result)
-            except (InterruptRequested, ConfirmationRequested):
-                raise
-            except Exception as e:
-                error_msg = f"Tool execution failed: {e}"
-                print(f"Error: {error_msg}")
-                self._add_tool_result(tool_call.id, tool_name, error_msg)
 
     def clear_history(self) -> None:
         """Clear conversation history, keeping only the system prompt."""
-        system_msg = self.history[0] if self.history else None
-        self.history = []
-        if system_msg and system_msg.role == MessageRole.SYSTEM:
-            self.history.append(system_msg)
-        # clear interrupt state
-        self._pending_interrupt = None
-        self._pending_tool_calls = None
+        self.memory.clear(keep_system=True)
 
     def get_history(self) -> list[dict]:
-        """Get conversation history as list of dicts.
-
-        Returns:
-            List of message dictionaries
-        """
-        return [msg.to_dict() for msg in self.history]
+        """Get conversation history as list of dicts."""
+        return self.memory.get_history()
 
     def visualize(self) -> str:
-        """Generate a Mermaid diagram of the agent structure.
-
-        Returns:
-            Mermaid diagram string
-        """
+        """Generate a Mermaid diagram of the agent structure."""
         from .visualizer import AgentVisualizer
-        visualizer = AgentVisualizer(list(self.tools.values()))
+        visualizer = AgentVisualizer(list(self.tool_executor.tools.values()))
         return visualizer.generate_mermaid_graph()
