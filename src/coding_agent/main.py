@@ -111,6 +111,18 @@ def main():
         default="127.0.0.1",
         help="Host for the API server (default: 127.0.0.1)"
     )
+    parser.add_argument(
+        "--multi-agent",
+        action="store_true",
+        help="Run in multi-agent mode with supervisor and workers"
+    )
+    parser.add_argument(
+        "--workers",
+        nargs="+",
+        choices=["coder", "researcher", "reviewer"],
+        default=["coder", "researcher"],
+        help="Workers to include in multi-agent mode (default: coder researcher)"
+    )
     args = parser.parse_args()
 
     # setup logging early
@@ -172,6 +184,11 @@ def main():
     system_prompt = SYSTEM_PROMPT
     if args.verbose:
         system_prompt += THOUGHT_SUFFIX
+
+    # handle multi-agent mode
+    if args.multi_agent:
+        run_multi_agent(client, args.workers, args.stream, args.verbose)
+        return
 
     agent = CodingAgent(client, tools, system_prompt=system_prompt)
 
@@ -247,6 +264,84 @@ def run_repl(agent: CodingAgent, stream: bool = False, verbose: bool = False) ->
         except ProviderUnavailableError as e:
             print(f"Provider unavailable: {e}")
             print("Please try again later.")
+        except AgentError as e:
+            print(f"Agent error: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {type(e).__name__}: {e}")
+
+
+def run_multi_agent(
+    client,
+    worker_names: list[str],
+    stream: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Run the multi-agent system with supervisor and workers.
+
+    Args:
+        client: The LLM client to use for all agents.
+        worker_names: List of worker types to create.
+        stream: Whether to stream responses.
+        verbose: Whether to print verbose output.
+    """
+    from .multi_agent import (
+        SupervisorAgent,
+        create_coder_worker,
+        create_researcher_worker,
+        create_reviewer_worker,
+    )
+
+    # create workers based on selection
+    worker_factories = {
+        "coder": create_coder_worker,
+        "researcher": create_researcher_worker,
+        "reviewer": create_reviewer_worker,
+    }
+
+    workers = {}
+    for name in worker_names:
+        if name in worker_factories:
+            workers[name] = worker_factories[name](client)
+            print(f"  Created worker: {name}")
+
+    if not workers:
+        print("Error: No valid workers specified.")
+        return
+
+    # create supervisor
+    supervisor = SupervisorAgent(client, workers, verbose=verbose)
+    print(f"\nMulti-Agent System Initialized with {len(workers)} workers.")
+    print("Type 'exit' to quit.")
+    print("-" * 50)
+
+    while True:
+        try:
+            user_input = input("You: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nGoodbye!")
+            break
+
+        if user_input.lower() in ("exit", "quit"):
+            print("Goodbye!")
+            break
+
+        if not user_input.strip():
+            continue
+
+        try:
+            result = supervisor.run(user_input, stream=stream)
+
+            if result.content:
+                print(f"\nSupervisor: {result.content}")
+            elif result.error:
+                print(f"\nError: {result.error}")
+
+        except AuthenticationError as e:
+            print(f"Authentication error: {e}")
+        except RateLimitError as e:
+            print(f"Rate limit exceeded: {e}")
+        except ProviderUnavailableError as e:
+            print(f"Provider unavailable: {e}")
         except AgentError as e:
             print(f"Agent error: {e}")
         except Exception as e:
