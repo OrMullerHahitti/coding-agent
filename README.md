@@ -307,6 +307,3 @@ class MyTool(BaseTool):
         return f"Result: {param1}"
 ```
 
-## License
-
-[Add your license here]
